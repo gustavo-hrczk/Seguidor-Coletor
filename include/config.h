@@ -51,8 +51,8 @@
 //#define PIN_LED_B 10                 // LED RGB - Azul
 
 // --- CONFIGURAÇÃO DE PINOS - SENSOR ULTRASSÔNICO ---
-#define PIN_TRIGGER 13               // Pino Trigger HC-SR04
-#define PIN_ECHO 12                  // Pino Echo HC-SR04
+#define PIN_TRIGGER 12               // Pino Trigger HC-SR04
+#define PIN_ECHO 13                  // Pino Echo HC-SR04
 
 // --- CONFIGURAÇÃO DE PINOS - SERVO (GARRA) ---
 #define PIN_SERVO 8                  // Pino servo da garra
@@ -82,8 +82,8 @@
 #define CURVE_COMPENSATION_SHARP 0.6  // Compensação acentuada (40% de diferença)
 
 // --- CONFIGURAÇÃO DA GARRA ---
-#define SERVO_ANGLE_OPEN 180         // Ângulo servo - garra aberta
-#define SERVO_ANGLE_CLOSED 0         // Ângulo servo - garra fechada
+#define SERVO_ANGLE_OPEN 0         // Ângulo servo - garra aberta
+#define SERVO_ANGLE_CLOSED 180         // Ângulo servo - garra fechada
 #define SERVO_STABILIZATION_TIME 500 // Tempo para estabilizar garra após fechar
 
 // --- DISTÂNCIAS DE MOVIMENTO ---

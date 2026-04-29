@@ -18,7 +18,6 @@
 // --- CONFIGURAÇÃO DE TEMPOS (em ms) ---
 #define CYCLE_MAIN 100               // Ciclo principal de atualização
 #define SENSOR_FILTER_CYCLES 3       // Ciclos de filtro/debounce para validação
-#define SERVO_TIMEOUT 3000           // Timeout para liberar servo se travar (ms)
 #define LINE_SEARCH_TIMEOUT 2000     // Timeout para busca de linha (200ms de perda máx)
 #define LINE_SEARCH_MAX_ROTATIONS 5  // Máximo de rotações de 360° para buscar linha
 #define ULTRASONIC_DEBOUNCE_TIME 300 // Tempo mínimo entre detecções (ms)
@@ -58,11 +57,11 @@
 #define PIN_SERVO 8                  // Pino servo da garra
 
 // --- LIMIARES E THRESHOLDS ---
-#define THRESHOLD_LINE_SENSOR 700    // Limite para distinguir linha branca de fundo
+#define THRESHOLD_LINE_SENSOR 700    // Limite para distinguir linha branca de fundo (calibrado: min=0-27, max=140-335)
 #define ULTRASONIC_DISTANCE_LONG 30  // Distância longa (fase 1 de aproximação) - cm
 #define ULTRASONIC_DISTANCE_SHORT 15 // Distância curta (fase 2 de aproximação) - cm
 #define ULTRASONIC_DISTANCE_CONTACT 5 // Distância de contato (fase 3 - coleta) - cm
-#define ULTRASONIC_NOISE_TOLERANCE 5 // Tolerância de variação para debounce (%)
+#define ULTRASONIC_NOISE_TOLERANCE 30 // Tolerância de variação para debounce (%)
 
 // --- VELOCIDADES ESPECÍFICAS POR PADRÃO DE SENSOR ---
 // Array de velocidades indexado pelo padrão de sensor (6 bits)
@@ -82,9 +81,14 @@
 #define CURVE_COMPENSATION_SHARP 0.6  // Compensação acentuada (40% de diferença)
 
 // --- CONFIGURAÇÃO DA GARRA ---
-#define SERVO_ANGLE_OPEN 0         // Ângulo servo - garra aberta
-#define SERVO_ANGLE_CLOSED 180         // Ângulo servo - garra fechada
-#define SERVO_STABILIZATION_TIME 500 // Tempo para estabilizar garra após fechar
+#define SERVO_STEP_DELAY_MS 10  // Tempo entre passos de movimento do servo (Quanto menor, mais rápido)
+#define SERVO_ANGLE_OPEN 5         // Ângulo servo - garra aberta
+#define SERVO_ANGLE_CLOSED 90         // Ângulo servo - garra fechada
+#define SERVO_STABILIZATION_TIME 400 // Tempo para estabilizar garra após fechar
+
+// --- CONFIGURAÇÃO DA GARRA REATIVA (TEMPO CONTÍNUO) ---
+#define GRIPPER_STABLE_TIME_MS  300   // Y: tempo contínuo dentro da distância para fechar (ms)
+#define GRIPPER_HOLD_TIME_MS    3000   // Z: tempo que a garra permanece fechada (ms)
 
 // --- DISTÂNCIAS DE MOVIMENTO ---
 #define REVERSE_DISTANCE_AFTER_COLLECT 5 // Distância em cm para recuar após coleta

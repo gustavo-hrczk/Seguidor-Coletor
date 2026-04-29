@@ -4,49 +4,78 @@
 #include <Arduino.h>
 #include "config.h"
 
+// ============================================================================
+// LineSensor — leitura ponderada contínua + classificação de padrão
+//
+// Posição retornada por getLinePosition():
+//   -1.0 = linha na extrema esquerda
+//    0.0 = linha centralizada
+//   +1.0 = linha na extrema direita
+//
+// Padrão retornado por getLinePattern():
+//   Derivado da magnitude do erro e do número de sensores ativos.
+//   Usado pela máquina de estados para decidir velocidade e comportamento.
+// ============================================================================
+
 class LineSensor {
 public:
     struct SensorState {
-        bool    sensors[6];
-        uint8_t rawPattern;
-        bool    isValid;
+        int     raw[6];        // Leituras analógicas brutas (0–1023)
+        bool    active[6];     // true = sensor sobre a linha
+        uint8_t activeCount;   // Número de sensores ativos
+        float   position;      // Posição ponderada normalizada (-1.0 a +1.0)
+        bool    isValid;       // Passou no filtro de estabilidade
     };
 
     enum LinePattern {
         UNKNOWN      = 0,
-        STRAIGHT     = 1,
-        CURVE_LIGHT  = 2,
-        CURVE_MEDIUM = 3,
-        CURVE_SHARP  = 4,
-        INTERSECTION = 5,
-        LINE_LOST    = 6
+        STRAIGHT     = 1,   // |erro| < 0.3
+        CURVE_LIGHT  = 2,   // |erro| 0.3–0.5
+        CURVE_MEDIUM = 3,   // |erro| 0.5–0.7
+        CURVE_SHARP  = 4,   // |erro| > 0.7
+        TURN_LEFT_90 = 5,   // Cruzamento T — linha à esquerda
+        TURN_RIGHT_90= 6,   // Cruzamento T — linha à direita
+        INTERSECTION = 7,   // Cruzamento X (5+ sensores)
+        LINE_LOST    = 8
     };
+
+    // Última direção conhecida — usada na recuperação
+    enum LastDirection { DIR_LEFT = -1, DIR_CENTER = 0, DIR_RIGHT = 1 };
 
     LineSensor();
     void initialize();
 
+    // Lê sensores, atualiza estado interno e retorna estado atual
     SensorState readSensors();
-    void        resetFilter();
 
-    SensorState getLastValidState() const { return lastValidState; }
-    LinePattern getLinePattern()    const { return identifyPattern(lastValidState); }
-    bool        isLineDetected()    const { return lastValidState.rawPattern != 0; }
-    uint8_t     getRawPattern()     const { return lastValidState.rawPattern; }
-    int         getActiveSensor()   const;
+    // Retorna posição normalizada da linha (-1.0 a +1.0)
+    float getLinePosition() const { return _state.position; }
 
+    // Classifica o padrão atual com base em posição e contagem de sensores
+    LinePattern getLinePattern() const;
+
+    // Última direção válida antes de perder a linha
+    LastDirection getLastDirection() const { return _lastDirection; }
+
+    bool    isLineDetected()    const { return _state.activeCount > 0 && _state.isValid; }
+    uint8_t getActiveCount()    const { return _state.activeCount; }
+    SensorState getState()      const { return _state; }
+
+    void resetFilter();
     void printSensorValues() const;
 
 private:
-    SensorState lastValidState;
-    SensorState rawReadings;
-    SensorState previousReading;
-    uint8_t     filterCounter;
-    uint8_t     stableCounter;     // conta leituras consecutivas idênticas
+    SensorState   _state;
+    SensorState   _prevState;
+    uint8_t       _stableCounter;
+    LastDirection _lastDirection;
 
-    SensorState performRawRead();
-    LinePattern identifyPattern(const SensorState& state) const;
-    bool        validateDebounce(const SensorState& current,
-                                 const SensorState& previous) const;
+    // Pesos dos 6 sensores: simétricos, normalizados para posição -1.0..+1.0
+    static const int WEIGHTS[6];
+
+    SensorState   performRead();
+    float         calculatePosition(const SensorState& s) const;
+    bool          isStable(const SensorState& a, const SensorState& b) const;
 };
 
 #endif

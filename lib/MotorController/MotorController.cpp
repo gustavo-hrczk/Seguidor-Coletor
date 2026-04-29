@@ -1,12 +1,13 @@
 #include "MotorController.h"
 
-// Convenção de sinal adotada em setMotorSpeed():
-//   Motor esquerdo: positivo = ré, negativo = frente  (montagem invertida)
+// Convenção de sinal em setMotorSpeed():
+//   Motor esquerdo: positivo = ré,   negativo = frente  (montagem invertida)
 //   Motor direito:  positivo = frente, negativo = ré
-// Isso é compensado em move() — não altere os sinais sem revisar move().
+// Compensado em move() — não altere os sinais sem revisar move().
 
 MotorController::MotorController()
-    : currentLeftSpeed(0), currentRightSpeed(0) {}
+    : _currentLeft(0), _currentRight(0),
+      _prevError(0.0f), _lastPDTime(0) {}
 
 void MotorController::initialize() {
     pinMode(PIN_IN1, OUTPUT);
@@ -18,71 +19,105 @@ void MotorController::initialize() {
     stop();
 }
 
+// ---------------------------------------------------------------------
 void MotorController::setMotorSpeed(int speedLeft, int speedRight) {
-    currentLeftSpeed  = speedLeft;
-    currentRightSpeed = speedRight;
-
+    _currentLeft  = speedLeft;
+    _currentRight = speedRight;
     setPinDirection(PIN_IN3, PIN_IN4, PIN_ENA, speedLeft);
     setPinDirection(PIN_IN1, PIN_IN2, PIN_ENB, speedRight);
 }
 
+// ---------------------------------------------------------------------
 void MotorController::move(Direction direction, uint8_t speed) {
     speed = constrain(speed, 0, 255);
-
     switch (direction) {
         case FORWARD:    setMotorSpeed(-speed,  speed); break;
         case BACKWARD:   setMotorSpeed( speed, -speed); break;
         case TURN_LEFT:  setMotorSpeed(-speed, -speed); break;
         case TURN_RIGHT: setMotorSpeed( speed,  speed); break;
-        case STOP:
         default:         stop(); break;
     }
 }
 
-void MotorController::stop() {
-    setMotorSpeed(0, 0);
-}
-
 // ---------------------------------------------------------------------
-// Curva compensada: motor externo a 100%, interno reduzido pelo fator
-// Usa int para evitar cast undefined behavior com uint8_t
+void MotorController::stop() { setMotorSpeed(0, 0); }
+
 // ---------------------------------------------------------------------
 void MotorController::curveCompensated(Direction direction, uint8_t speed,
                                         float compensationFactor) {
-    int outerSpeed = constrain((int)speed, 0, 255);
-    int innerSpeed = constrain((int)(speed * compensationFactor), 0, 255);
+    int outer = constrain((int)speed, 0, 255);
+    int inner = constrain((int)(speed * compensationFactor), 0, 255);
+    applyDeadzoneCorrection(outer);
+    applyDeadzoneCorrection(inner);
 
-    applyDeadzoneCorrection(outerSpeed);
-    applyDeadzoneCorrection(innerSpeed);
+    if      (direction == TURN_LEFT)  setMotorSpeed(-inner,  outer);
+    else if (direction == TURN_RIGHT) setMotorSpeed(-outer,  inner);
+}
 
-    if (direction == TURN_LEFT) {
-        // Esquerda interna, direita externa
-        setMotorSpeed(-innerSpeed, outerSpeed);
-    } else if (direction == TURN_RIGHT) {
-        // Direita interna, esquerda externa
-        setMotorSpeed(-outerSpeed, innerSpeed);
+// ---------------------------------------------------------------------
+// Controlador PD de seguimento de linha
+//
+// correction = Kp * erro + Kd * (erro - erroAnterior)
+//
+// Positivo = linha à direita → acelera esquerdo, freia direito
+// Negativo = linha à esquerda → freia esquerdo, acelera direito
+// ---------------------------------------------------------------------
+void MotorController::followLine(float linePosition, uint8_t baseSpeed) {
+    unsigned long now = millis();
+    if (now - _lastPDTime < PD_SAMPLE_MS) return;
+    _lastPDTime = now;
+
+    float error      = linePosition;   // 0 = centrado, meta é sempre 0
+    float derivative = error - _prevError;
+    float correction = (PD_KP * error) + (PD_KD * derivative);
+    _prevError       = error;
+
+    // Escala a correção para PWM (máximo teórico: Kp*1.0 + Kd*2.0)
+    int corrPWM = (int)(correction * baseSpeed);
+    corrPWM     = constrain(corrPWM, -baseSpeed, baseSpeed);
+
+    int leftSpeed  = (int)baseSpeed + corrPWM;
+    int rightSpeed = (int)baseSpeed - corrPWM;
+
+    leftSpeed  = constrain(leftSpeed,  PWM_MIN_DEADZONE, 255);
+    rightSpeed = constrain(rightSpeed, PWM_MIN_DEADZONE, 255);
+
+    // Aplica convenção de sinal (motor esquerdo montado invertido)
+    setMotorSpeed(-leftSpeed, rightSpeed);
+
+    if (DEBUG_MODE) {
+        static unsigned long lastDbg = 0;
+        if (now - lastDbg >= 200) {
+            lastDbg = now;
+            Serial.print(F("[PD] err="));   Serial.print(error,  3);
+            Serial.print(F(" der="));       Serial.print(derivative, 3);
+            Serial.print(F(" cor="));       Serial.print(corrPWM);
+            Serial.print(F(" L="));         Serial.print(leftSpeed);
+            Serial.print(F(" R="));         Serial.println(rightSpeed);
+        }
     }
 }
 
-void MotorController::applyDeadzoneCorrection(int& pwmValue) const {
-    if      (pwmValue > 0 && pwmValue < PWM_MIN_DEADZONE)  pwmValue = PWM_MIN_DEADZONE;
-    else if (pwmValue < 0 && pwmValue > -PWM_MIN_DEADZONE) pwmValue = -PWM_MIN_DEADZONE;
+// ---------------------------------------------------------------------
+void MotorController::resetPD() {
+    _prevError   = 0.0f;
+    _lastPDTime  = 0;
 }
 
-void MotorController::setPinDirection(int in1, int in2, int pwmPin, int speed) {
-    int pwmValue = constrain(abs(speed), 0, 255);
+// ---------------------------------------------------------------------
+void MotorController::applyDeadzoneCorrection(int& v) const {
+    if      (v > 0 && v <  PWM_MIN_DEADZONE) v =  PWM_MIN_DEADZONE;
+    else if (v < 0 && v > -PWM_MIN_DEADZONE) v = -PWM_MIN_DEADZONE;
+}
 
+// ---------------------------------------------------------------------
+void MotorController::setPinDirection(int in1, int in2, int pwmPin, int speed) {
+    int pwm = constrain(abs(speed), 0, 255);
     if (speed == 0) {
-        digitalWrite(in1, LOW);
-        digitalWrite(in2, LOW);
-        analogWrite(pwmPin, 0);
+        digitalWrite(in1, LOW); digitalWrite(in2, LOW); analogWrite(pwmPin, 0);
     } else if (speed > 0) {
-        digitalWrite(in1, HIGH);
-        digitalWrite(in2, LOW);
-        analogWrite(pwmPin, pwmValue);
+        digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(pwmPin, pwm);
     } else {
-        digitalWrite(in1, LOW);
-        digitalWrite(in2, HIGH);
-        analogWrite(pwmPin, pwmValue);
+        digitalWrite(in1, LOW);  digitalWrite(in2, HIGH); analogWrite(pwmPin, pwm);
     }
 }

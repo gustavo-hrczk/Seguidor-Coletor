@@ -15,97 +15,107 @@
 // ============================================================================
 void testMotors() {
     Serial.println(F("\n=== TESTE DE MOTORES ==="));
-    Serial.println(F("Velocidade base: VELOCITY_GLOBAL"));
+    Serial.print(F("VELOCITY_GLOBAL=")); Serial.println(VELOCITY_GLOBAL);
 
     MotorController motor;
     motor.initialize();
 
-    Serial.println(F("[Motor] FRENTE por 2s..."));
-    motor.move(MotorController::FORWARD, VELOCITY_GLOBAL);
-    delay(2000);
-    motor.stop();
-    delay(500);
+    struct { const __FlashStringHelper* label; MotorController::Direction dir; } moves[] = {
+        { F("FRENTE"),   MotorController::FORWARD    },
+        { F("RE"),       MotorController::BACKWARD   },
+        { F("ESQUERDA"), MotorController::TURN_LEFT  },
+        { F("DIREITA"),  MotorController::TURN_RIGHT },
+    };
 
-    Serial.println(F("[Motor] RE por 2s..."));
-    motor.move(MotorController::BACKWARD, VELOCITY_GLOBAL);
-    delay(2000);
-    motor.stop();
-    delay(500);
+    for (auto& m : moves) {
+        Serial.print(F("[Motor] ")); Serial.print(m.label); Serial.println(F(" por 2s..."));
+        motor.move(m.dir, VELOCITY_GLOBAL);
+        delay(2000);
+        motor.stop();
+        delay(500);
+    }
 
-    Serial.println(F("[Motor] ESQUERDA por 2s..."));
-    motor.move(MotorController::TURN_LEFT, VELOCITY_GLOBAL);
-    delay(2000);
-    motor.stop();
-    delay(500);
+    // Curvas compensadas com os três fatores do config
+    struct { const __FlashStringHelper* label; float factor; } curves[] = {
+        { F("CURVA SUAVE  (0.9)"), CURVE_COMPENSATION_LIGHT  },
+        { F("CURVA MEDIA  (0.8)"), CURVE_COMPENSATION_MEDIUM },
+        { F("CURVA AGUDA  (0.6)"), CURVE_COMPENSATION_SHARP  },
+    };
 
-    Serial.println(F("[Motor] DIREITA por 2s..."));
-    motor.move(MotorController::TURN_RIGHT, VELOCITY_GLOBAL);
-    delay(2000);
-    motor.stop();
-    delay(500);
+    for (auto& c : curves) {
+        Serial.print(F("[Motor] ESQ ")); Serial.print(c.label); Serial.println(F("..."));
+        motor.curveCompensated(MotorController::TURN_LEFT, VELOCITY_GLOBAL, c.factor);
+        delay(1500);
+        motor.stop();
+        delay(300);
 
-    Serial.println(F("[Motor] Curva compensada ESQUERDA (fator 0.6) por 2s..."));
-    motor.curveCompensated(MotorController::TURN_LEFT, VELOCITY_GLOBAL,
-                           CURVE_COMPENSATION_SHARP);
-    delay(2000);
-    motor.stop();
-    delay(500);
-
-    Serial.println(F("[Motor] Curva compensada DIREITA (fator 0.6) por 2s..."));
-    motor.curveCompensated(MotorController::TURN_RIGHT, VELOCITY_GLOBAL,
-                           CURVE_COMPENSATION_SHARP);
-    delay(2000);
-    motor.stop();
+        Serial.print(F("[Motor] DIR ")); Serial.print(c.label); Serial.println(F("..."));
+        motor.curveCompensated(MotorController::TURN_RIGHT, VELOCITY_GLOBAL, c.factor);
+        delay(1500);
+        motor.stop();
+        delay(300);
+    }
 
     Serial.println(F("\n✓ Teste de motores concluido"));
 }
 
 // ============================================================================
-// TESTE 2: SENSORES DE LINHA
+// TESTE 2: SENSORES DE LINHA (posição ponderada contínua)
 // ============================================================================
 void testLineSensors() {
     Serial.println(F("\n=== TESTE DE SENSORES DE LINHA ==="));
-    Serial.print(F("Threshold: ")); Serial.println(THRESHOLD_LINE_SENSOR);
-    Serial.print(F("Filtro:    ")); Serial.print(SENSOR_FILTER_CYCLES);
-    Serial.println(F(" leituras estaveis para validar"));
+    Serial.print(F("Threshold: "));      Serial.println(THRESHOLD_LINE_SENSOR);
+    Serial.print(F("Filtro: "));         Serial.print(SENSOR_FILTER_CYCLES);
+    Serial.println(F(" leituras estaveis"));
+    Serial.println(F("Pesos: S1=-5 S2=-3 S3=-1 S4=+1 S5=+3 S6=+5"));
     Serial.println(F("Posicione o robo sobre a linha e aguarde..."));
     delay(2000);
 
-    LineSensor lineSensor;
-    lineSensor.initialize();
+    LineSensor sensor;
+    sensor.initialize();
 
-    Serial.println(F("Lendo sensores por 15 segundos..."));
+    Serial.println(F("Lendo por 20 segundos — mova o robo sobre curvas e retas:"));
     unsigned long startTime = millis();
     unsigned long lastPrint = 0;
 
-    while (millis() - startTime < 15000) {
-        LineSensor::SensorState state = lineSensor.readSensors();
+    while (millis() - startTime < 20000) {
+        LineSensor::SensorState state = sensor.readSensors();
 
-        if (millis() - lastPrint >= 300) {
+        if (millis() - lastPrint >= 200) {
             lastPrint = millis();
 
-            // Padrão visual dos 6 sensores
+            const __FlashStringHelper* rotPad;
+            switch (sensor.getLinePattern()) {
+                case LineSensor::STRAIGHT:      rotPad = F("RETA");          break;
+                case LineSensor::CURVE_LIGHT:   rotPad = F("CURVA SUAVE");   break;
+                case LineSensor::CURVE_MEDIUM:  rotPad = F("CURVA MEDIA");   break;
+                case LineSensor::CURVE_SHARP:   rotPad = F("CURVA AGUDA");   break;
+                case LineSensor::TURN_LEFT_90:  rotPad = F("CRUZAMENTO-ESQ");break;
+                case LineSensor::TURN_RIGHT_90: rotPad = F("CRUZAMENTO-DIR");break;
+                case LineSensor::INTERSECTION:  rotPad = F("INTERSECCAO-X"); break;
+                case LineSensor::LINE_LOST:     rotPad = F("LINHA PERDIDA"); break;
+                default:                        rotPad = F("DESCONHECIDO");  break;
+            }
+
             Serial.print(F("  ["));
             Serial.print((millis() - startTime) / 1000);
-            Serial.print(F("s] sensores="));
-            for (int i = 0; i < 6; i++) {
-                Serial.print(state.sensors[i] ? '1' : '0');
-            }
-            Serial.print(F(" | raw=0b"));
-            Serial.print(state.rawPattern, BIN);
-            Serial.print(F(" | valid="));
-            Serial.print(state.isValid ? F("S") : F("N"));
-            Serial.print(F(" | padrao="));
+            Serial.print(F("s] ativos="));
+            for (int i = 0; i < 6; i++) Serial.print(state.active[i] ? '1' : '0');
+            Serial.print(F(" | pos="));
 
-            switch (lineSensor.getLinePattern()) {
-                case LineSensor::STRAIGHT:     Serial.println(F("RETA"));           break;
-                case LineSensor::CURVE_LIGHT:  Serial.println(F("CURVA SUAVE"));    break;
-                case LineSensor::CURVE_MEDIUM: Serial.println(F("CURVA MEDIA"));    break;
-                case LineSensor::CURVE_SHARP:  Serial.println(F("CURVA ACENTUADA")); break;
-                case LineSensor::INTERSECTION: Serial.println(F("INTERSECCAO"));    break;
-                case LineSensor::LINE_LOST:    Serial.println(F("LINHA PERDIDA"));  break;
-                default:                       Serial.println(F("DESCONHECIDO"));   break;
-            }
+            // Barra visual de posição  [-1.0 ... 0.0 ... +1.0]
+            char bar[22];
+            int  idx = (int)((state.position + 1.0f) * 10.0f);
+            idx = constrain(idx, 0, 20);
+            for (int i = 0; i < 21; i++) bar[i] = (i == 10) ? '|' : '-';
+            bar[idx] = '#';
+            bar[21]  = '\0';
+            Serial.print('['); Serial.print(bar); Serial.print(F("] "));
+
+            Serial.print(state.position, 3);
+            Serial.print(F(" | cnt="));  Serial.print(state.activeCount);
+            Serial.print(F(" | valid=")); Serial.print(state.isValid ? F("S") : F("N"));
+            Serial.print(F(" | pad="));  Serial.println(rotPad);
         }
     }
 
@@ -372,7 +382,90 @@ void calibrateThreshold() {
 }
 
 // ============================================================================
-// SETUP E LOOP PRINCIPAL (MENU DE TESTES)
+// TESTE 7: SEGUIMENTO PD (motor + sensor integrados)
+// ============================================================================
+void testLineFollowing() {
+    Serial.println(F("\n=== TESTE DE SEGUIMENTO PD ==="));
+    Serial.print(F("Kp=")); Serial.print(PD_KP);
+    Serial.print(F(" Kd=")); Serial.print(PD_KD);
+    Serial.print(F(" sample=")); Serial.print(PD_SAMPLE_MS); Serial.println(F("ms"));
+    Serial.println(F("Velocidades: erro<0.3 -> FAST | 0.3-0.6 -> MEDIUM | >0.6 -> SLOW"));
+    Serial.println(F("Posicione o robo sobre a linha. Iniciando em 3s..."));
+    delay(3000);
+
+    LineSensor      sensor;
+    MotorController motor;
+
+    sensor.initialize();
+    motor.initialize();
+    motor.resetPD();
+
+    const unsigned long RUN_DURATION = 20000UL;
+    unsigned long startTime = millis();
+    unsigned long lastPrint = 0;
+
+    while (millis() - startTime < RUN_DURATION) {
+        sensor.readSensors();
+        float    pos     = sensor.getLinePosition();
+        float    absPos  = fabs(pos);
+        LineSensor::LinePattern pattern = sensor.getLinePattern();
+
+        // Seleciona velocidade base pela magnitude do erro
+        uint8_t baseSpeed;
+        if      (absPos < 0.3f) baseSpeed = SPEED_ERROR_LOW;
+        else if (absPos < 0.6f) baseSpeed = SPEED_ERROR_MEDIUM;
+        else                    baseSpeed = SPEED_ERROR_HIGH;
+
+        // Linha perdida: gira na última direção conhecida
+        if (pattern == LineSensor::LINE_LOST) {
+            motor.stop();
+            if (DEBUG_MODE) Serial.println(F("[PD] LINHA PERDIDA — aguardando"));
+            delay(50);
+            continue;
+        }
+
+        // Cruzamentos: manter frente por enquanto (expansão futura)
+        if (pattern == LineSensor::INTERSECTION   ||
+            pattern == LineSensor::TURN_LEFT_90   ||
+            pattern == LineSensor::TURN_RIGHT_90) {
+            motor.move(MotorController::FORWARD, SPEED_ERROR_LOW);
+            if (DEBUG_MODE) Serial.println(F("[PD] CRUZAMENTO — passando reto"));
+            delay(PD_SAMPLE_MS);
+            continue;
+        }
+
+        motor.followLine(pos, baseSpeed);
+
+        // Debug periódico
+        if (DEBUG_MODE && (millis() - lastPrint >= 300)) {
+            lastPrint = millis();
+
+            const __FlashStringHelper* rotPad;
+            switch (pattern) {
+                case LineSensor::STRAIGHT:     rotPad = F("RETA");         break;
+                case LineSensor::CURVE_LIGHT:  rotPad = F("C-SUAVE");      break;
+                case LineSensor::CURVE_MEDIUM: rotPad = F("C-MEDIA");      break;
+                case LineSensor::CURVE_SHARP:  rotPad = F("C-AGUDA");      break;
+                default:                       rotPad = F("?");            break;
+            }
+
+            Serial.print(F("  ["));
+            Serial.print((millis() - startTime) / 1000);
+            Serial.print(F("s] pos="));    Serial.print(pos, 3);
+            Serial.print(F(" | base="));   Serial.print(baseSpeed);
+            Serial.print(F(" | pad="));    Serial.print(rotPad);
+            Serial.print(F(" | L="));      Serial.print(motor.getLeftSpeed());
+            Serial.print(F(" | R="));      Serial.println(motor.getRightSpeed());
+        }
+
+        delay(PD_SAMPLE_MS);
+    }
+
+    motor.stop();
+    Serial.println(F("\n✓ Teste de seguimento PD concluido"));
+}
+// ============================================================================
+// SETUP E LOOP — menu atualizado com teste 7
 // ============================================================================
 void setup() {
     Serial.begin(BAUD_RATE);
@@ -381,34 +474,35 @@ void setup() {
     Serial.println(F("\n╔════════════════════════════════════════╗"));
     Serial.println(F("║   PROGRAMA DE TESTE DE COMPONENTES    ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
-    Serial.println(F("\nSelecione um teste:"));
     Serial.println(F("1 - Testar Motores"));
     Serial.println(F("2 - Testar Sensores de Linha"));
-    Serial.println(F("3 - Testar Ultrassônico"));
-    Serial.println(F("4 - Testar Servo Garra (não bloqueante)"));
-    Serial.println(F("5 - Testar Garra Reativa (detecção contínua)"));
+    Serial.println(F("3 - Testar Ultrassonico"));
+    Serial.println(F("4 - Testar Servo Garra"));
+    Serial.println(F("5 - Testar Garra Reativa"));
     Serial.println(F("6 - Calibrar Threshold de Linha"));
+    Serial.println(F("7 - Testar Seguimento PD (motor+sensor)"));
 }
 
 int selectedTest = 0;
 
 void loop() {
     if (Serial.available()) {
-        char cmd = Serial.read();
+        char cmd    = Serial.read();
         selectedTest = cmd - '0';
 
         switch (selectedTest) {
-            case 1: testMotors(); break;
-            case 2: testLineSensors(); break;
-            case 3: testUltrasonic(); break;
-            case 4: testGripper(); break;
+            case 1: testMotors();          break;
+            case 2: testLineSensors();     break;
+            case 3: testUltrasonic();      break;
+            case 4: testGripper();         break;
             case 5: testGripperReactive(); break;
-            case 6: calibrateThreshold(); break;
-            default: Serial.println(F("Opção inválida!"));
+            case 6: calibrateThreshold();  break;
+            case 7: testLineFollowing();   break;
+            default: Serial.println(F("Opcao invalida!")); break;
         }
 
         Serial.println(F("\n╔════════════════════════════════════════╗"));
-        Serial.println(F("║   Teste concluído. Próximo teste?     ║"));
+        Serial.println(F("║   Teste concluido. Proximo teste?     ║"));
         Serial.println(F("╚════════════════════════════════════════╝"));
     }
     delay(100);

@@ -4,73 +4,53 @@
 #include <Arduino.h>
 #include "config.h"
 
-// ============================================================================
-// CLASSE: MotorController
-// Responsável pelo controle de motores com escalação de velocidade baseada
-// em VELOCITY_GLOBAL. Implementa compensação de curva e deadzone automático.
-// ============================================================================
-
 class MotorController {
 public:
-    // Direções de movimento
     enum Direction {
-        STOP = 0,
-        FORWARD = 1,
-        BACKWARD = 2,
-        TURN_LEFT = 3,
-        TURN_RIGHT = 4
+        STOP = 0, FORWARD = 1, BACKWARD = 2,
+        TURN_LEFT = 3, TURN_RIGHT = 4
     };
 
-    // ===== CONSTRUTOR E INICIALIZAÇÃO =====
     MotorController();
-    
-    /**
-     * Inicializa pinos e configura PWM
-     */
     void initialize();
 
-    // ===== CONTROLE DE MOVIMENTO =====
-    
-    /**
-     * Define ambos os motores com controle de velocidade
-     * @param speedLeft Velocidade esquerda (-255 a +255)
-     * @param speedRight Velocidade direita (-255 a +255)
-     */
+    // Controle direto de velocidade por motor (-255..+255)
     void setMotorSpeed(int speedLeft, int speedRight);
 
-    /**
-     * Movimento predefinido com compensação automática
-     * @param direction Direção desejada (FORWARD, BACKWARD, etc)
-     * @param speed Velocidade em escala normalizada (0-255)
-     */
+    // Movimento predefinido
     void move(Direction direction, uint8_t speed = VELOCITY_GLOBAL);
 
-    /**
-     * Parada imediata dos motores
-     */
+    // Parada imediata
     void stop();
 
-    /**
-     * Curva compensada mantendo raio constante
-     * @param direction TURN_LEFT ou TURN_RIGHT
-     * @param speed Velocidade base
-     * @param compensationFactor Fator de compensação (ex: 0.8 = 80% de diferença)
-     */
-    void curveCompensated(Direction direction, uint8_t speed, float compensationFactor);
+    // Curva com fator de compensação explícito
+    void curveCompensated(Direction direction, uint8_t speed,
+                          float compensationFactor);
 
-    // ===== GETTERS =====
-    int getLeftSpeed() const { return currentLeftSpeed; }
-    int getRightSpeed() const { return currentRightSpeed; }
-    bool isMoving() const { return (currentLeftSpeed != 0 || currentRightSpeed != 0); }
+    // ── SEGUIMENTO DE LINHA ──────────────────────────────────────────
+    // Recebe posição normalizada (-1.0..+1.0) e aplica correção PD.
+    // Deve ser chamado a cada PD_SAMPLE_MS ms no loop principal.
+    // @param linePosition  saída de LineSensor::getLinePosition()
+    // @param baseSpeed     velocidade base (use SPEED_ERROR_* conforme padrão)
+    void followLine(float linePosition, uint8_t baseSpeed = VELOCITY_GLOBAL);
+
+    // Reseta o estado interno do PD (chamar ao retomar seguimento)
+    void resetPD();
+
+    int  getLeftSpeed()  const { return _currentLeft;  }
+    int  getRightSpeed() const { return _currentRight; }
+    bool isMoving()      const { return (_currentLeft != 0 || _currentRight != 0); }
 
 private:
-    // Estado interno
-    int currentLeftSpeed;
-    int currentRightSpeed;
+    int   _currentLeft;
+    int   _currentRight;
 
-    // Métodos privados
+    // Estado PD
+    float         _prevError;
+    unsigned long _lastPDTime;
+
     void applyDeadzoneCorrection(int& pwmValue) const;
     void setPinDirection(int in1, int in2, int pwmPin, int speed);
 };
 
-#endif // MOTOR_CONTROLLER_H
+#endif

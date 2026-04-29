@@ -1,9 +1,13 @@
 #include "LineSensor.h"
 
-LineSensor::LineSensor() : filterCounter(0), stableCounter(0) {
-    memset(&lastValidState,  0, sizeof(SensorState));
-    memset(&rawReadings,     0, sizeof(SensorState));
-    memset(&previousReading, 0, sizeof(SensorState));
+// Pesos simétricos: S1=-5 S2=-3 S3=-1 S4=+1 S5=+3 S6=+5
+// Divisor máximo = 5+3+1+1+3+5 = 18 → normaliza para -1.0..+1.0
+const int LineSensor::WEIGHTS[6] = { -5, -3, -1, 1, 3, 5 };
+
+LineSensor::LineSensor()
+    : _stableCounter(0), _lastDirection(DIR_CENTER) {
+    memset(&_state,     0, sizeof(SensorState));
+    memset(&_prevState, 0, sizeof(SensorState));
 }
 
 void LineSensor::initialize() {
@@ -16,122 +20,133 @@ void LineSensor::initialize() {
 }
 
 // ---------------------------------------------------------------------
-// Lê sensores e aplica janela de debounce por contagem de ciclos estáveis
-// ---------------------------------------------------------------------
 LineSensor::SensorState LineSensor::readSensors() {
-    rawReadings = performRawRead();
+    SensorState current = performRead();
 
-    if (validateDebounce(rawReadings, previousReading)) {
-        stableCounter++;
-        if (stableCounter >= SENSOR_FILTER_CYCLES) {
-            lastValidState         = rawReadings;
-            lastValidState.isValid = true;
-        }
+    if (isStable(current, _prevState)) {
+        if (_stableCounter < SENSOR_FILTER_CYCLES) _stableCounter++;
     } else {
-        // Padrão mudou: reinicia contagem de estabilidade
-        stableCounter              = 0;
-        lastValidState.isValid     = false;
+        _stableCounter = 0;
     }
 
-    previousReading  = rawReadings;
-    return lastValidState;
-}
+    current.isValid = (_stableCounter >= SENSOR_FILTER_CYCLES);
 
-LineSensor::SensorState LineSensor::performRawRead() {
-    SensorState state;
-    int readings[6];
-
-    readings[0] = analogRead(PIN_S1);
-    readings[1] = analogRead(PIN_S2);
-    readings[2] = analogRead(PIN_S3);
-    readings[3] = analogRead(PIN_S4);
-    readings[4] = analogRead(PIN_S5);
-    readings[5] = analogRead(PIN_S6);
-
-    state.rawPattern = 0;
-    for (int i = 0; i < 6; i++) {
-        // Linha = leitura ABAIXO do threshold (sensor refletivo: linha clara = baixo)
-        state.sensors[i] = (readings[i] <= THRESHOLD_LINE_SENSOR);
-        if (state.sensors[i]) state.rawPattern |= (1 << i);
+    if (current.isValid && current.activeCount > 0) {
+        // Atualiza última direção conhecida
+        if (current.position < -0.15f)      _lastDirection = DIR_LEFT;
+        else if (current.position > 0.15f)  _lastDirection = DIR_RIGHT;
+        else                                 _lastDirection = DIR_CENTER;
     }
 
-    state.isValid = false;
-    return state;
+    _prevState = current;
+    _state     = current;
+    return _state;
 }
 
 // ---------------------------------------------------------------------
-// Debounce: aceita leitura se diferença <= 1 bit em relação à anterior
-// ---------------------------------------------------------------------
-bool LineSensor::validateDebounce(const SensorState& current,
-                                   const SensorState& previous) const {
-    uint8_t xorPattern  = current.rawPattern ^ previous.rawPattern;
-    uint8_t bitsChanged = 0;
+LineSensor::SensorState LineSensor::performRead() {
+    SensorState s;
+    s.activeCount = 0;
+    s.isValid     = false;
 
     for (int i = 0; i < 6; i++) {
-        if (xorPattern & (1 << i)) bitsChanged++;
+        s.raw[i]    = analogRead(PIN_S1 + i);   // A0..A5 são contíguos
+        // Linha clara sobre fundo escuro: valor baixo = linha
+        s.active[i] = (s.raw[i] <= THRESHOLD_LINE_SENSOR);
+        if (s.active[i]) s.activeCount++;
     }
 
-    return bitsChanged <= 1;
+    s.position = calculatePosition(s);
+    return s;
 }
 
 // ---------------------------------------------------------------------
-// Identifica padrão de linha com todos os casos do enum mapeados
-// Índices:  s1=extrema esq | s2=esq | s3=centro-esq | s4=centro-dir | s5=dir | s6=extrema dir
+// Centro de massa ponderado normalizado
+// Se nenhum sensor ativo: mantém última posição conhecida (não zera)
 // ---------------------------------------------------------------------
-LineSensor::LinePattern LineSensor::identifyPattern(const SensorState& state) const {
-    if (state.rawPattern == 0) return LINE_LOST;
-
-    uint8_t activeCount = 0;
-    for (int i = 0; i < 6; i++) {
-        if (state.sensors[i]) activeCount++;
+float LineSensor::calculatePosition(const SensorState& s) const {
+    if (s.activeCount == 0) {
+        // Linha perdida: retorna posição extrema na última direção
+        return (_lastDirection == DIR_RIGHT) ? 1.0f :
+               (_lastDirection == DIR_LEFT)  ? -1.0f : _state.position;
     }
 
-    if (activeCount >= 4) return INTERSECTION;
+    long  weightedSum = 0;
+    int   totalWeight = 0;
 
-    bool s1 = state.sensors[0], s2 = state.sensors[1];
-    bool s3 = state.sensors[2], s4 = state.sensors[3];
-    bool s5 = state.sensors[4], s6 = state.sensors[5];
-
-    // Reta: apenas os dois centrais
-    if (!s1 && !s2 && s3 && s4 && !s5 && !s6) return STRAIGHT;
-
-    // Curva suave: um central + adjacente imediato
-    if (!s1 && !s2 && s3 && !s4 && !s5 && !s6) return CURVE_LIGHT;  // levemente esq
-    if (!s1 && !s2 && !s3 && s4 && !s5 && !s6) return CURVE_LIGHT;  // levemente dir
-
-    // Curva média: sensor intermediário ativo
-    if (!s1 && s2 && !s3 && !s4 && !s5 && !s6) return CURVE_MEDIUM; // médio esq
-    if (!s1 && !s2 && !s3 && !s4 && s5 && !s6) return CURVE_MEDIUM; // médio dir
-    if (!s1 && s2 && s3 && !s4 && !s5 && !s6)  return CURVE_MEDIUM;
-    if (!s1 && !s2 && !s3 && s4 && s5 && !s6)  return CURVE_MEDIUM;
-
-    // Curva acentuada: sensores extremos ativos
-    if (s1 || s6) return CURVE_SHARP;
-
-    return UNKNOWN;
-}
-
-int LineSensor::getActiveSensor() const {
     for (int i = 0; i < 6; i++) {
-        if (lastValidState.sensors[i]) return i;
+        if (s.active[i]) {
+            // Usa o inverso da leitura como intensidade:
+            // leitura baixa = mais sobre a linha = mais peso
+            int intensity = THRESHOLD_LINE_SENSOR - s.raw[i];
+            intensity     = max(intensity, 1);   // evita peso zero
+            weightedSum  += (long)WEIGHTS[i] * intensity;
+            totalWeight  += intensity;
+        }
     }
-    return -1;
+
+    if (totalWeight == 0) return 0.0f;
+
+    // Normaliza: divisor máximo teórico = 5 * THRESHOLD_LINE_SENSOR
+    float raw = (float)weightedSum / (float)totalWeight;
+
+    // Clamp e normalização para -1.0..+1.0
+    float normalized = raw / 5.0f;
+    return constrain(normalized, -1.0f, 1.0f);
 }
 
+// ---------------------------------------------------------------------
+LineSensor::LinePattern LineSensor::getLinePattern() const {
+    if (!_state.isValid || _state.activeCount == 0) return LINE_LOST;
+
+    // Cruzamento X: 5 ou 6 sensores ativos
+    if (_state.activeCount >= CROSS_MIN_SENSORS_X) return INTERSECTION;
+
+    // Cruzamento T: 4 sensores ativos — detecta direção dominante
+    if (_state.activeCount >= CROSS_MIN_SENSORS_T) {
+        return (_state.position <= 0.0f) ? TURN_LEFT_90 : TURN_RIGHT_90;
+    }
+
+    // Seguimento normal por magnitude de erro
+    float absPos = fabs(_state.position);
+
+    if      (absPos < 0.3f) return STRAIGHT;
+    else if (absPos < 0.5f) return CURVE_LIGHT;
+    else if (absPos < 0.7f) return CURVE_MEDIUM;
+    else                    return CURVE_SHARP;
+}
+
+// ---------------------------------------------------------------------
+bool LineSensor::isStable(const SensorState& a, const SensorState& b) const {
+    // Estável se o padrão binário difere em no máximo 1 bit
+    uint8_t patA = 0, patB = 0;
+    for (int i = 0; i < 6; i++) {
+        if (a.active[i]) patA |= (1 << i);
+        if (b.active[i]) patB |= (1 << i);
+    }
+    uint8_t diff     = patA ^ patB;
+    uint8_t changed  = 0;
+    for (int i = 0; i < 6; i++) {
+        if (diff & (1 << i)) changed++;
+    }
+    return changed <= 1;
+}
+
+// ---------------------------------------------------------------------
 void LineSensor::resetFilter() {
-    filterCounter = 0;
-    stableCounter = 0;
-    memset(&previousReading, 0, sizeof(SensorState));
+    _stableCounter = 0;
+    memset(&_prevState, 0, sizeof(SensorState));
 }
 
+// ---------------------------------------------------------------------
 void LineSensor::printSensorValues() const {
     if (!DEBUG_MODE) return;
     Serial.print(F("[Line] "));
-    for (int i = 0; i < 6; i++) {
-        Serial.print(lastValidState.sensors[i] ? '1' : '0');
-    }
-    Serial.print(F(" | pat=0b"));
-    Serial.print(lastValidState.rawPattern, BIN);
+    for (int i = 0; i < 6; i++) Serial.print(_state.active[i] ? '1' : '0');
+    Serial.print(F(" | pos="));
+    Serial.print(_state.position, 3);
+    Serial.print(F(" | cnt="));
+    Serial.print(_state.activeCount);
     Serial.print(F(" | valid="));
-    Serial.println(lastValidState.isValid ? F("S") : F("N"));
+    Serial.println(_state.isValid ? F("S") : F("N"));
 }

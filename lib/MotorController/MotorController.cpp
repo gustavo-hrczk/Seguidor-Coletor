@@ -67,33 +67,43 @@ void MotorController::followLine(float linePosition, uint8_t baseSpeed) {
     if (now - _lastPDTime < PD_SAMPLE_MS) return;
     _lastPDTime = now;
 
-    float error      = linePosition;   // 0 = centrado, meta é sempre 0
+    float error      = linePosition;
     float derivative = error - _prevError;
     float correction = (PD_KP * error) + (PD_KD * derivative);
     _prevError       = error;
 
-    // Escala a correção para PWM (máximo teórico: Kp*1.0 + Kd*2.0)
-    int corrPWM = (int)(correction * baseSpeed);
-    corrPWM     = constrain(corrPWM, -baseSpeed, baseSpeed);
+    // Correção normalizada: 0.0 = reto, 1.0 = curva máxima
+    float corrNorm = constrain(fabs(correction), 0.0f, 1.0f);
 
-    int leftSpeed  = (int)baseSpeed + corrPWM;
-    int rightSpeed = (int)baseSpeed - corrPWM;
+    // Motor externo sempre a baseSpeed
+    // Motor interno reduzido proporcionalmente — nunca abaixo de PD_MIN_INNER_SPEED
+    int outerSpeed = baseSpeed;
+    int innerSpeed = (int)(baseSpeed * (1.0f - corrNorm));
+    innerSpeed     = constrain(innerSpeed, PD_MIN_INNER_SPEED, baseSpeed);
 
-    leftSpeed  = constrain(leftSpeed,  PWM_MIN_DEADZONE, 255);
-    rightSpeed = constrain(rightSpeed, PWM_MIN_DEADZONE, 255);
+    // Aplica direção da correção
+    // Positivo = linha à direita → curva direita → esquerdo é externo
+    // Negativo = linha à esquerda → curva esquerda → direito é externo
+    int leftSpeed, rightSpeed;
+    if (correction >= 0.0f) {
+        leftSpeed  = outerSpeed;
+        rightSpeed = innerSpeed;
+    } else {
+        leftSpeed  = innerSpeed;
+        rightSpeed = outerSpeed;
+    }
 
-    // Aplica convenção de sinal (motor esquerdo montado invertido)
+    // Convenção de sinal (motor esquerdo montado invertido)
     setMotorSpeed(-leftSpeed, rightSpeed);
 
     if (DEBUG_MODE) {
         static unsigned long lastDbg = 0;
         if (now - lastDbg >= 200) {
             lastDbg = now;
-            Serial.print(F("[PD] err="));   Serial.print(error,  3);
-            Serial.print(F(" der="));       Serial.print(derivative, 3);
-            Serial.print(F(" cor="));       Serial.print(corrPWM);
-            Serial.print(F(" L="));         Serial.print(leftSpeed);
-            Serial.print(F(" R="));         Serial.println(rightSpeed);
+            Serial.print(F("[PD] err="));  Serial.print(error, 3);
+            Serial.print(F(" cor="));      Serial.print(correction, 3);
+            Serial.print(F(" L="));        Serial.print(leftSpeed);
+            Serial.print(F(" R="));        Serial.println(rightSpeed);
         }
     }
 }
@@ -106,8 +116,8 @@ void MotorController::resetPD() {
 
 // ---------------------------------------------------------------------
 void MotorController::applyDeadzoneCorrection(int& v) const {
-    if      (v > 0 && v <  PWM_MIN_DEADZONE) v =  PWM_MIN_DEADZONE;
-    else if (v < 0 && v > -PWM_MIN_DEADZONE) v = -PWM_MIN_DEADZONE;
+    if      (v > 0 && v <  PD_MIN_INNER_SPEED) v =  PD_MIN_INNER_SPEED;
+    else if (v < 0 && v > -PD_MIN_INNER_SPEED) v = -PD_MIN_INNER_SPEED;
 }
 
 // ---------------------------------------------------------------------

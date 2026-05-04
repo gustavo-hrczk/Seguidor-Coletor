@@ -1,152 +1,144 @@
 #include "LineSensor.h"
 
-// Pesos simétricos: S1=-5 S2=-3 S3=-1 S4=+1 S5=+3 S6=+5
-// Divisor máximo = 5+3+1+1+3+5 = 18 → normaliza para -1.0..+1.0
+// Pesos: sensor mais à esquerda = -5, mais à direita = +5
+// Centro = 0 quando S3+S4 ativos com intensidade igual
 const int LineSensor::WEIGHTS[6] = { -5, -3, -1, 1, 3, 5 };
 
-LineSensor::LineSensor()
-    : _stableCounter(0), _lastDirection(DIR_CENTER) {
-    memset(&_state,     0, sizeof(SensorState));
-    memset(&_prevState, 0, sizeof(SensorState));
+// ─────────────────────────────────────────────────────────────────────────────
+LineSensor::LineSensor() : _lastDir(DIR_CENTER) {
+    memset(&_state, 0, sizeof(SensorState));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 void LineSensor::initialize() {
-    pinMode(PIN_S1, INPUT);
-    pinMode(PIN_S2, INPUT);
-    pinMode(PIN_S3, INPUT);
-    pinMode(PIN_S4, INPUT);
-    pinMode(PIN_S5, INPUT);
-    pinMode(PIN_S6, INPUT);
+    // Pinos A0–A5 são INPUT por padrão no Arduino — pinMode explícito para clareza
+    for (int i = 0; i < 6; i++) {
+        pinMode(A0 + i, INPUT);
+    }
 }
 
-// ---------------------------------------------------------------------
-LineSensor::SensorState LineSensor::readSensors() {
-    SensorState current = performRead();
+// ─────────────────────────────────────────────────────────────────────────────
+// Leitura direta sem filtro — LineSensor precisa de reatividade máxima.
+// Filtragem pertence ao UltrasonicSensor, não aqui.
+// ─────────────────────────────────────────────────────────────────────────────
+const LineSensor::SensorState& LineSensor::readSensors() {
+    _state.activeCount = 0;
 
-    if (isStable(current, _prevState)) {
-        if (_stableCounter < SENSOR_FILTER_CYCLES) _stableCounter++;
-    } else {
-        _stableCounter = 0;
+    for (int i = 0; i < 6; i++) {
+        _state.raw[i]    = analogRead(A0 + i);
+
+        // Linha branca = valor BAIXO → ativo quando raw <= THRESHOLD
+        _state.active[i] = (_state.raw[i] <= THRESHOLD_LINE_SENSOR);
+
+        if (_state.active[i]) _state.activeCount++;
     }
 
-    current.isValid = (_stableCounter >= SENSOR_FILTER_CYCLES);
+    _state.position = computePosition();
 
-    if (current.isValid && current.activeCount > 0) {
-        // Atualiza última direção conhecida
-        if (current.position < -0.15f)      _lastDirection = DIR_LEFT;
-        else if (current.position > 0.15f)  _lastDirection = DIR_RIGHT;
-        else                                 _lastDirection = DIR_CENTER;
+    // Atualiza última direção conhecida — usado na recuperação de linha perdida
+    if (_state.activeCount > 0) {
+        if      (_state.position < -0.10f) _lastDir = DIR_LEFT;
+        else if (_state.position >  0.10f) _lastDir = DIR_RIGHT;
+        else                               _lastDir = DIR_CENTER;
     }
 
-    _prevState = current;
-    _state     = current;
     return _state;
 }
 
-// ---------------------------------------------------------------------
-LineSensor::SensorState LineSensor::performRead() {
-    SensorState s;
-    s.activeCount = 0;
-    s.isValid     = false;
-
-    for (int i = 0; i < 6; i++) {
-        s.raw[i]    = analogRead(PIN_S1 + i);   // A0..A5 são contíguos
-        // Linha clara sobre fundo escuro: valor baixo = linha
-        s.active[i] = (s.raw[i] <= THRESHOLD_LINE_SENSOR);
-        if (s.active[i]) s.activeCount++;
+// ─────────────────────────────────────────────────────────────────────────────
+// Centro de massa ponderado por intensidade
+//
+// Intensidade = THRESHOLD - raw
+//   raw próximo de 0   → muito sobre a linha → intensidade alta → mais peso
+//   raw próximo de THRESHOLD → borda da linha → intensidade baixa → menos peso
+//
+// Resultado normalizado para -1.0..+1.0 dividindo pelo peso máximo (5)
+// ─────────────────────────────────────────────────────────────────────────────
+float LineSensor::computePosition() const {
+    if (_state.activeCount == 0) {
+        // Linha perdida: retorna extremo na última direção conhecida
+        // Isso mantém o PD corrigindo na direção certa durante recuperação
+        if (_lastDir == DIR_RIGHT) return  1.0f;
+        if (_lastDir == DIR_LEFT)  return -1.0f;
+        return 0.0f;
     }
 
-    s.position = calculatePosition(s);
-    return s;
-}
-
-// ---------------------------------------------------------------------
-// Centro de massa ponderado normalizado
-// Se nenhum sensor ativo: mantém última posição conhecida (não zera)
-// ---------------------------------------------------------------------
-float LineSensor::calculatePosition(const SensorState& s) const {
-    if (s.activeCount == 0) {
-        // Linha perdida: retorna posição extrema na última direção
-        return (_lastDirection == DIR_RIGHT) ? 1.0f :
-               (_lastDirection == DIR_LEFT)  ? -1.0f : _state.position;
-    }
-
-    long  weightedSum = 0;
-    int   totalWeight = 0;
+    long weightedSum = 0;
+    int  totalWeight = 0;
 
     for (int i = 0; i < 6; i++) {
-        if (s.active[i]) {
-            // Usa o inverso da leitura como intensidade:
-            // leitura baixa = mais sobre a linha = mais peso
-            int intensity = THRESHOLD_LINE_SENSOR - s.raw[i];
-            intensity     = max(intensity, 1);   // evita peso zero
-            weightedSum  += (long)WEIGHTS[i] * intensity;
-            totalWeight  += intensity;
+        if (_state.active[i]) {
+            int intensity = THRESHOLD_LINE_SENSOR - _state.raw[i];
+            if (intensity < 1) intensity = 1;   // garante peso mínimo não-zero
+            weightedSum += (long)WEIGHTS[i] * intensity;
+            totalWeight += intensity;
         }
     }
 
     if (totalWeight == 0) return 0.0f;
 
-    // Normaliza: divisor máximo teórico = 5 * THRESHOLD_LINE_SENSOR
-    float raw = (float)weightedSum / (float)totalWeight;
+    // Divide por totalWeight → posição média ponderada em escala dos pesos (-5..+5)
+    // Divide por 5 → normaliza para -1.0..+1.0
+    float pos = (float)weightedSum / (float)totalWeight / 5.0f;
 
-    // Clamp e normalização para -1.0..+1.0
-    float normalized = raw / 5.0f;
-    return constrain(normalized, -1.0f, 1.0f);
+    // constrain por segurança numérica
+    if (pos < -1.0f) pos = -1.0f;
+    if (pos >  1.0f) pos =  1.0f;
+
+    return pos;
 }
 
-// ---------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
 LineSensor::LinePattern LineSensor::getLinePattern() const {
-    if (!_state.isValid || _state.activeCount == 0) return LINE_LOST;
 
-    // Cruzamento X: 5 ou 6 sensores ativos
-    if (_state.activeCount >= CROSS_MIN_SENSORS_X) return INTERSECTION;
+    if (_state.activeCount == 0)
+        return LINE_LOST;
 
-    // Cruzamento T: 4 sensores ativos — detecta direção dominante
-    if (_state.activeCount >= CROSS_MIN_SENSORS_T) {
-        return (_state.position <= 0.0f) ? TURN_LEFT_90 : TURN_RIGHT_90;
+    // Cruzamento X: 5 ou 6 sensores — linha larga ou intersecção real
+    if (_state.activeCount >= 5)
+        return INTERSECTION;
+
+    // Cruzamento T: exatamente 4 sensores — detecta direção dominante
+    if (_state.activeCount == 4) {
+        return (_state.position < 0.0f) ? TURN_LEFT_90 : TURN_RIGHT_90;
     }
 
-    // Seguimento normal por magnitude de erro
-    float absPos = fabs(_state.position);
+    // Seguimento normal: classifica por magnitude da posição
+    float absPos = (_state.position < 0) ? -_state.position : _state.position;
 
-    if      (absPos < 0.3f) return STRAIGHT;
-    else if (absPos < 0.5f) return CURVE_LIGHT;
-    else if (absPos < 0.7f) return CURVE_MEDIUM;
-    else                    return CURVE_SHARP;
+    if      (absPos < 0.20f) return STRAIGHT;
+    else if (absPos < 0.45f) return CURVE_LIGHT;
+    else if (absPos < 0.70f) return CURVE_MEDIUM;
+    else                     return CURVE_SHARP;
 }
 
-// ---------------------------------------------------------------------
-bool LineSensor::isStable(const SensorState& a, const SensorState& b) const {
-    // Estável se o padrão binário difere em no máximo 1 bit
-    uint8_t patA = 0, patB = 0;
-    for (int i = 0; i < 6; i++) {
-        if (a.active[i]) patA |= (1 << i);
-        if (b.active[i]) patB |= (1 << i);
-    }
-    uint8_t diff     = patA ^ patB;
-    uint8_t changed  = 0;
-    for (int i = 0; i < 6; i++) {
-        if (diff & (1 << i)) changed++;
-    }
-    return changed <= 1;
-}
-
-// ---------------------------------------------------------------------
-void LineSensor::resetFilter() {
-    _stableCounter = 0;
-    memset(&_prevState, 0, sizeof(SensorState));
-}
-
-// ---------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
 void LineSensor::printSensorValues() const {
     if (!DEBUG_MODE) return;
+
+    // Padrão binário
     Serial.print(F("[Line] "));
-    for (int i = 0; i < 6; i++) Serial.print(_state.active[i] ? '1' : '0');
-    Serial.print(F(" | pos="));
+    for (int i = 0; i < 6; i++) {
+        Serial.print(_state.active[i] ? '1' : '0');
+    }
+
+    // Barra visual de posição [-1.0 ---|--- +1.0]
+    char bar[22];
+    int  idx = (int)((_state.position + 1.0f) * 10.0f);
+    if (idx < 0)  idx = 0;
+    if (idx > 20) idx = 20;
+    for (int i = 0; i < 21; i++) bar[i] = (i == 10) ? '|' : '-';
+    bar[idx] = '#';
+    bar[21]  = '\0';
+
+    Serial.print(F(" ["));  Serial.print(bar);  Serial.print(F("] "));
     Serial.print(_state.position, 3);
-    Serial.print(F(" | cnt="));
-    Serial.print(_state.activeCount);
-    Serial.print(F(" | valid="));
-    Serial.println(_state.isValid ? F("S") : F("N"));
+    Serial.print(F(" cnt=")); Serial.print(_state.activeCount);
+
+    // Valores brutos — essenciais para diagnóstico de threshold
+    Serial.print(F(" raw:"));
+    for (int i = 0; i < 6; i++) {
+        Serial.print(F(" ")); Serial.print(_state.raw[i]);
+    }
+    Serial.println();
 }

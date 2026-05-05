@@ -11,7 +11,7 @@ Robô seguidor de linha com módulo de coleta de objetos via garra servo. Desenv
 | Microcontrolador | Arduino UNO | 1 |
 | Driver de motor | L298N | 1 |
 | Motores DC | TT Motor 3–6V | 2 |
-| Sensor de linha | QTR-6 analógico | 1 |
+| Sensor de linha | QTR-1 analógico | 6 |
 | Sensor ultrassônico | HC-SR04 | 1 |
 | Servo | SG90 | 1 |
 

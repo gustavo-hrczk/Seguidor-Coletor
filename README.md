@@ -1,54 +1,137 @@
-# 🤖 Robô Seguidor de Linha com Garra Reativa
+# Seguidor Coletor — Arduino UNO
 
-Robô autônomo baseado em Arduino que segue linha preta em fundo claro, detecta objetos com sensor ultrassônico e coleta-os utilizando um servo motor. O sistema inclui um controlador PD para seguimento suave, filtros de estabilidade para sensores e uma máquina de estados para aproximação e coleta.
+Robô seguidor de linha com módulo de coleta de objetos via garra servo. Desenvolvido em C++ para Arduino UNO com arquitetura modular orientada a classes.
 
-## ✨ Funcionalidades
+---
 
-- **Seguimento de linha** – 6 sensores QTR com posição ponderada contínua e controle PD adaptativo.
-- **Detecção de cruzamentos** – diferencia entre reta, curva suave/média/aguda, cruzamento em T e cruzamento em X.
-- **Coleta reativa** – utiliza sensor ultrassônico com validação de estabilidade para acionar a garra.
-- **Testes individuais** – menu serial para testar motores, sensores, servo e calibração.
-- **Modo debug** – saída detalhada via Serial para ajustes finos.
+## Hardware
 
-## 🧰 Hardware Necessário
+| Componente | Modelo | Quantidade |
+|---|---|---|
+| Microcontrolador | Arduino UNO | 1 |
+| Driver de motor | L298N | 1 |
+| Motores DC | TT Motor 3–6V | 2 |
+| Sensor de linha | QTR-6 analógico | 1 |
+| Sensor ultrassônico | HC-SR04 | 1 |
+| Servo | SG90 | 1 |
 
-| Componente               | Especificação / Modelo        | Quantidade |
-|--------------------------|-------------------------------|------------|
-| Arduino Uno / Mega       | Atmega328P / 2560             | 1          |
-| Sensor de linha QTR-6    | 6 sensores analógicos         | 1          |
-| Sensor ultrassônico      | HC-SR04                       | 1          |
-| Ponte H                   | L298N ou similar              | 1          |
-| Motores DC com rodas     | 6V~12V                        | 2          |
-| Servo motor              | 9g ou padrão                  | 1          |
-| Bateria                  | 7.4V~12V                      | 1          |
-| Chassi seguidor de linha | –                             | 1          |
+### Pinagem
 
-## 🔌 Pinagem (configuração padrão)
+```
+MOTOR
+  IN1 → D2    IN2 → D4    ENA → D3  (PWM, motor direito)
+  IN3 → D5    IN4 → D7    ENB → D6  (PWM, motor esquerdo)
 
-| Componente        | Pino Arduino |
-|-------------------|--------------|
-| Motor A (IN1)     | 2            |
-| Motor A (IN2)     | 4            |
-| Motor B (IN3)     | 5            |
-| Motor B (IN4)     | 7            |
-| PWM Motor A (ENA) | 3            |
-| PWM Motor B (ENB) | 6            |
-| Sensor S1 (A0)    | A0           |
-| Sensor S2 (A1)    | A1           |
-| Sensor S3 (A2)    | A2           |
-| Sensor S4 (A3)    | A3           |
-| Sensor S5 (A4)    | A4           |
-| Sensor S6 (A5)    | A5           |
-| Trigger (HC-SR04) | 12           |
-| Echo (HC-SR04)    | 13           |
-| Servo sinal       | 8            |
+SENSOR DE LINHA (QTR-6)
+  S1 → A0   S2 → A1   S3 → A2
+  S4 → A3   S5 → A4   S6 → A5
 
-> ⚠️ **Atenção:** O motor esquerdo está montado invertido mecanicamente. O código já compensa essa inversão na função `setMotorSpeed()`.
+ULTRASSÔNICO (HC-SR04)
+  TRIGGER → D12   ECHO → D13
 
-## 📦 Instalação do Software
+SERVO (SG90)
+  SINAL → D9
+```
 
-1. Instale a [IDE Arduino](https://www.arduino.cc/en/software) (versão 1.8.19 ou superior).
-2. Instale a biblioteca `Servo` (já inclusa na IDE).
-3. Clone este repositório:
-   ```bash
-   git clone https://github.com/seu-usuario/robo-seguidor-coletor.git
+> **Nota:** S1 (A0) apresenta leitura instável no hardware atual. Está desabilitado via `LINE_SENSOR_MASK` no `config.h` até substituição.
+
+---
+
+## Estrutura do projeto
+
+```
+/
+├── src/
+│   ├── main.cpp              # Máquina de estados principal (seguidor)
+│   ├── test_components.cpp   # Menu de testes isolados por módulo
+│   └── config.h              # Configuração central — edite aqui
+├── lib/
+│   ├── LineSensor/
+│   │   ├── LineSensor.h
+│   │   └── LineSensor.cpp
+│   ├── MotorController/
+│   │   ├── MotorController.h
+│   │   └── MotorController.cpp
+│   ├── UltrasonicSensor/
+│   │   ├── UltrasonicSensor.h
+│   │   └── UltrasonicSensor.cpp
+│   └── GripperServo/
+│       ├── GripperServo.h
+│       └── GripperServo.cpp
+├── docs/
+│   ├── README.md             # Este arquivo
+│   ├── CALIBRATION.md        # Guia de calibração passo a passo
+│   └── CONFIG_INDEX.md       # Índice de todas as constantes do config.h
+└── platformio.ini
+```
+
+---
+
+## Módulos
+
+### `LineSensor`
+Lê os 6 sensores QTR analógicos e calcula a posição da linha por centro de massa ponderado. Retorna posição normalizada de -1.0 (extrema esquerda) a +1.0 (extrema direita) e classifica o padrão (STRAIGHT, CURVE_LIGHT, CURVE_MEDIUM, CURVE_SHARP, INTERSECTION, LINE_LOST).
+
+Sem filtro de debounce — reatividade máxima é necessária para seguimento em alta velocidade.
+
+### `MotorController`
+Controla os dois motores DC via L298N. Implementa o controlador PD de seguimento de linha em `followLine()`, onde o motor externo à curva mantém velocidade base e o motor interno é reduzido proporcionalmente ao erro.
+
+### `UltrasonicSensor`
+Lê o HC-SR04 com validação por janela deslizante (3 leituras consecutivas consistentes). Classifica a distância em 3 fases: DISTANT (>30cm), APPROACHING (>15cm), CONTACT (≤5cm).
+
+### `GripperServo`
+Controla o SG90 com movimento gradual grau a grau e `detach()` após estabilização, eliminando aquecimento e micro-vibrações entre comandos.
+
+---
+
+## Fluxo de operação (main.cpp)
+
+```
+SETUP → inicialização dos módulos → delay 3s → STATE_FOLLOWING
+
+STATE_FOLLOWING
+  ├─ Lê LineSensor
+  ├─ Calcula baseSpeed por magnitude do erro
+  ├─ Chama motor.followLine(pos, baseSpeed)
+  └─ Se LINE_LOST → STATE_RECOVERING
+
+STATE_RECOVERING
+  ├─ Estágio 1: gira na última direção por RECOVERY_SPIN_MS
+  ├─ Estágio 2: gira na direção oposta até RECOVERY_TIMEOUT_MS
+  └─ Se linha encontrada → STATE_FOLLOWING
+     Se timeout → STATE_STOPPED
+
+STATE_STOPPED
+  └─ Para motores, aguarda intervenção
+```
+
+> Módulos `UltrasonicSensor` e `GripperServo` serão acoplados como `STATE_COLLECTING` entre `STATE_FOLLOWING` e `STATE_RECOVERING`.
+
+---
+
+## Início rápido
+
+1. Compile e grave `test_components.cpp` (comente `main.cpp` no build)
+2. Abra o monitor serial em 9600 baud
+3. Execute o **Teste 6** para calibrar o threshold da linha
+4. Atualize `THRESHOLD_LINE_SENSOR` no `config.h`
+5. Execute o **Teste 2** para validar a leitura dos sensores
+6. Execute o **Teste 1** para validar os motores e direções
+7. Grave `main.cpp` e posicione o robô sobre a linha
+
+---
+
+## Debug
+
+Com `DEBUG_MODE true` no `config.h`, todos os módulos imprimem no Serial a 9600 baud. Para desabilitar e liberar memória, setar `DEBUG_MODE false` — o compilador remove todo o código de debug.
+
+Prefixos de log:
+
+| Prefixo | Módulo |
+|---|---|
+| `[Line]` | LineSensor |
+| `[PD]` | MotorController::followLine |
+| `[Ultrasonic]` | UltrasonicSensor |
+| `[Gripper]` | GripperServo |
+| `[Main]` | main.cpp |

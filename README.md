@@ -33,8 +33,6 @@ SERVO (SG90)
   SINAL → D9
 ```
 
-> **Nota:** S1 (A0) apresenta leitura instável no hardware atual. Está desabilitado via `LINE_SENSOR_MASK` no `config.h` até substituição.
-
 ---
 
 ## Estrutura do projeto
@@ -42,8 +40,8 @@ SERVO (SG90)
 ```
 /
 ├── src/
-│   ├── main.cpp              # Máquina de estados principal (seguidor)
-│   ├── test_components.cpp   # Menu de testes isolados por módulo
+│   ├── main.cpp              # Máquina de estados principal (seguidor) *AINDA NÃO IMPLEMENTADO
+│   ├── test_components.cpp   # Menu de testes isolados por módulo *ATUALMENTE INCLUSO EM MAIN.CPP
 │   └── config.h              # Configuração central — edite aqui
 ├── lib/
 │   ├── LineSensor/

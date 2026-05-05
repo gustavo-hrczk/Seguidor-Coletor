@@ -41,7 +41,7 @@
 // ----------------------------------------------------------------------------
 // PINOS — SERVO (SG90)
 // ----------------------------------------------------------------------------
-#define PIN_SERVO 8
+#define PIN_SERVO 9
 
 // ----------------------------------------------------------------------------
 // VELOCIDADES
@@ -147,7 +147,7 @@
 // para eliminar aquecimento e vibração do motor entre comandos.
 // ----------------------------------------------------------------------------
 #define SERVO_ANGLE_OPEN          5    // graus — evitar 0° (limite mecânico)
-#define SERVO_ANGLE_CLOSED       90    // graus
+#define SERVO_ANGLE_CLOSED       180    // graus
 #define SERVO_STEP_DELAY_MS      10    // ms entre cada grau (menor = mais rápido)
 #define SERVO_STABILIZATION_TIME 400   // ms aguardando antes do detach()
 

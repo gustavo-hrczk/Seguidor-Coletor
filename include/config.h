@@ -49,7 +49,7 @@
 // SPEED_ERROR_*: usados EXCLUSIVAMENTE por followLine() via handleFollowing()
 // Não misturar — são escalas independentes
 // ----------------------------------------------------------------------------
-#define VELOCITY_GLOBAL      150   // PWM para movimentos manuais e testes
+#define VELOCITY_GLOBAL      200   // PWM para movimentos manuais e testes
 #define PWM_SLOW              70   // PWM de recuperação de linha perdida
 #define PWM_MIN_DEADZONE      60   // PWM mínimo para vencer atrito estático
 
@@ -135,7 +135,7 @@
 // ----------------------------------------------------------------------------
 #define ULTRASONIC_DISTANCE_LONG    30   // cm — fase 1
 #define ULTRASONIC_DISTANCE_SHORT   15   // cm — fase 2
-#define ULTRASONIC_DISTANCE_CONTACT  5   // cm — gatilho de coleta
+#define ULTRASONIC_DISTANCE_CONTACT  4   // cm — gatilho de coleta
 #define ULTRASONIC_NOISE_TOLERANCE  30   // % de variação tolerada
 #define ULTRASONIC_DEBOUNCE_TIME   300   // ms mínimo entre detecções
 #define SENSOR_FILTER_CYCLES         3   // leituras consecutivas para validar
@@ -147,7 +147,7 @@
 // para eliminar aquecimento e vibração do motor entre comandos.
 // ----------------------------------------------------------------------------
 #define SERVO_ANGLE_OPEN          5    // graus — evitar 0° (limite mecânico)
-#define SERVO_ANGLE_CLOSED       180    // graus
+#define SERVO_ANGLE_CLOSED       170    // graus
 #define SERVO_STEP_DELAY_MS      10    // ms entre cada grau (menor = mais rápido)
 #define SERVO_STABILIZATION_TIME 400   // ms aguardando antes do detach()
 
@@ -162,5 +162,29 @@
 #define DEBUG_MODE       true    // false remove todo código de log (libera memória)
 #define RUNTIME_TOTAL    600000  // ms — reservado para uso futuro
 #define EEPROM_ADDR_LAST_TURN 0  // endereço EEPROM para última direção de giro
+
+// ----------------------------------------------------------------------------
+// CONFIGURAÇÕES PARA TESTE DE COLETA AUTÔNOMA // REMOVIVEIS APÓS ARQUIVO FINAL
+// ----------------------------------------------------------------------------
+#define MANEUVER_SPEED           200   // giro e deslocamento lateral
+#define COLLECT_STOP_DELAY       300   // ms para estabilizar antes da manobra
+#define COLLECT_CYCLE_DURATION   30000 // duração total do teste (2 minutos)
+
+// Tempos de deslocamento lateral (ms) – diferentes para garra fechada e aberta
+#define STRAFE_LOADED_FORWARD_MS    300   // ida (com objeto)
+#define STRAFE_UNLOADED_BACKWARD_MS 250   // volta sem objeto – usada para retornar
+
+// Giros (se o peso afetar, pode ter versões carregado/vazio)
+#define TURN_90_LOADED_MS   750   // giro com carga
+#define TURN_90_UNLOADED_MS 650   // giro sem carga
+
+#define MANEUVER_SPEED_LOADED   220   // potência maior com carga
+#define MANEUVER_SPEED_UNLOADED 200   // normal sem carga
+
+#define APPROACH_SPEED_FAST      200   // > 20 cm
+#define APPROACH_SPEED_MEDIUM    130   // 10-20 cm
+#define APPROACH_SPEED_SLOW       80   // < 10 cm
+#define APPROACH_DIST_LONG        20   // cm
+#define APPROACH_DIST_MEDIUM      10   // cm
 
 #endif // CONFIG_H

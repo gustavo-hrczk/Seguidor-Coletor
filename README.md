@@ -1,7 +1,7 @@
-# Seguidor Coletor — Arduino UNO
+# Seguidor Coletor — Arduino NANO
 
 Robô seguidor de linha com módulo de coleta de objetos via garra servo.
-Desenvolvido em C++ para Arduino UNO com arquitetura modular orientada a classes.
+Desenvolvido em C++ para Arduino NANO com arquitetura modular orientada a classes.
 
 ---
 
@@ -9,7 +9,7 @@ Desenvolvido em C++ para Arduino UNO com arquitetura modular orientada a classes
 
 | Componente          | Modelo           | Qtd |
 |---------------------|------------------|-----|
-| Microcontrolador    | Arduino UNO      | 1   |
+| Microcontrolador    | Arduino NANO      | 1   |
 | Driver de motor     | L298N            | 1   |
 | Motores DC          | TT Motor 3–6V    | 2   |
 | Sensor de linha     | QTR-1 analógico  | 6   |
@@ -138,7 +138,7 @@ STATE_STOPPED
 
 Com `DEBUG_MODE true` no `config.h`, todos os módulos imprimem no Serial
 a 9600 baud. Setar `false` remove todo o código de log em tempo de compilação,
-liberando memória de programa no Arduino UNO.
+liberando memória de programa no Arduino NANO.
 
 | Prefixo serial    | Módulo                        |
 |-------------------|-------------------------------|

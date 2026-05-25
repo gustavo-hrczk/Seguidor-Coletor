@@ -40,7 +40,7 @@
 #define PIN_IN4 6    // Motor esquerdo — sentido 2 (L298N: IN4)
 #define PIN_ENA 3    // PWM motor esquerdo — Timer 2 do UNO
 #define PIN_ENB 5    // PWM motor direito  — Timer 0 do UNO
-//Portas PWM Suportadas: 3, 5, 6, 9, 10, 11 (UNO)
+// Portas PWM suportadas no UNO: 3, 5, 6, 9, 10, 11
 
 // --- Sensores de linha (QTR-1 analógico × 6) ---
 // Disposição física da esquerda para a direita do robô.
@@ -68,10 +68,10 @@
 // ============================================================================
 
 // Velocidade padrão para movimentos manuais e testes isolados
-#define VELOCITY_GLOBAL      200
+#define VELOCITY_GLOBAL      220
 
 // Velocidade de recuperação de linha perdida — baixa para maior controle
-#define PWM_SLOW              70
+#define PWM_SLOW              170
 
 // PWM mínimo para vencer o atrito estático dos motores TT.
 // Abaixo desse valor o motor recebe sinal mas não gira com carga.
@@ -183,8 +183,13 @@
 // Acima desse percentual a leitura é considerada divergente
 #define ULTRASONIC_NOISE_TOLERANCE  30
 
-// Número de leituras consecutivas dentro da tolerância para marcar readingStable
-#define SENSOR_FILTER_CYCLES         3
+// Timeout do pulseIn: 15ms cobre até ~250cm — 2× mais rápido que 30ms
+// em ausência de eco, reduzindo latência do loop de aproximação
+#define ULTRASONIC_TIMEOUT_US   15000
+
+// Leituras consecutivas dentro da tolerância para marcar readingStable.
+// Valor 2 equilibra velocidade de resposta e proteção contra espúrios.
+#define SENSOR_FILTER_CYCLES     2
 
 
 // ============================================================================
@@ -219,35 +224,38 @@
 // Fluxo do ciclo:
 //   SEARCHING   → avança até objeto a <= ULTRASONIC_DISTANCE_CONTACT cm
 //   COLLECTING  → fecha garra
-//   MANEUVERING → desloca lateralmente (alternando esq/dir a cada ciclo)
+//   MANEUVERING → gira 90° e avança lateralmente (alternando esq/dir)
 //   RELEASING   → abre garra
-//   RETURNING   → executa manobra inversa pelo mesmo tempo
+//   RETURNING   → recua e gira de volta ao eixo original
 //   Repete até COLLECT_CYCLE_DURATION ms
 // ============================================================================
 
-// Velocidade de avanço em busca do objeto por fase de proximidade
+// Velocidades de aproximação — reduzem progressivamente conforme distância
 #define APPROACH_SPEED_FAST    200   // PWM quando dist > APPROACH_DIST_LONG
-#define APPROACH_SPEED_MEDIUM  130   // PWM quando dist entre APPROACH_DIST_MEDIUM e LONG
-#define APPROACH_SPEED_SLOW     80   // PWM quando dist <= APPROACH_DIST_MEDIUM
+#define APPROACH_SPEED_MEDIUM  170   // PWM quando dist entre MEDIUM e LONG
+#define APPROACH_SPEED_SLOW    140   // PWM quando dist <= APPROACH_DIST_MEDIUM
+// APPROACH_SPEED_SLOW deve ser maior que PWM_MIN_DEADZONE (60) para
+// garantir que o motor gire com carga mesmo com bateria em baixa tensão
 
 // Limiares de distância para troca de velocidade de aproximação (cm)
 #define APPROACH_DIST_LONG    20
 #define APPROACH_DIST_MEDIUM  10
 
-// Velocidade da manobra lateral — valores distintos compensam diferença de inércia
-#define MANEUVER_SPEED_LOADED    220   // PWM com objeto na garra (mais carga)
-#define MANEUVER_SPEED_UNLOADED  200   // PWM sem objeto (retorno)
+// Velocidades da manobra — distintas para compensar diferença de inércia com/sem carga
+#define MANEUVER_SPEED_LOADED    220   // PWM com objeto na garra
+#define MANEUVER_SPEED_UNLOADED  200   // PWM no retorno sem objeto
 
-// Tempo da manobra lateral (ms) — o retorno usa o mesmo valor na direção oposta
-// Ajustar até o deslocamento ser suficiente para liberar o objeto da trajetória
-#define STRAFE_LOADED_MS    300   // deslocamento lateral com objeto
-#define STRAFE_UNLOADED_MS  250   // retorno sem objeto (levemente mais rápido)
+// Tempo de deslocamento lateral (ms)
+// O retorno usa o mesmo tempo na direção oposta para voltar ao eixo original
+#define STRAFE_LOADED_MS    300   // avanço lateral com objeto
+#define STRAFE_UNLOADED_MS  250   // recuo lateral sem objeto
 
-// Tempo de giro de 90° (ms) — calibrar na pista com o peso real do robô
+// Tempo de giro de 90° (ms) — calibrar na pista com o peso real do robô.
+// Valores distintos compensam a diferença de inércia rotacional com/sem carga.
 #define TURN_90_LOADED_MS    750   // giro com carga
-#define TURN_90_UNLOADED_MS  650   // giro sem carga
+#define TURN_90_UNLOADED_MS  550   // giro sem carga
 
-// Pausa entre etapas do ciclo — permite estabilização mecânica
+// Pausa entre etapas do ciclo — permite estabilização mecânica do chassi
 #define COLLECT_STOP_DELAY   300   // ms
 
 // Duração total do programa de coleta

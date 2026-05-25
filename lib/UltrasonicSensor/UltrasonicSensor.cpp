@@ -53,14 +53,14 @@ int UltrasonicSensor::measureDistance() {
     delayMicroseconds(10);
     digitalWrite(PIN_TRIGGER, LOW);
 
-    // Aguarda borda de subida no ECHO — timeout 30ms evita travamento
-    long duration = pulseIn(PIN_ECHO, HIGH, 30000);
+    // Timeout configurável via config.h — reduzir melhora responsividade
+    // a custo de não detectar objetos muito distantes (acima de ~250cm a 15ms)
+    long duration = pulseIn(PIN_ECHO, HIGH, ULTRASONIC_TIMEOUT_US);
 
-    if (duration == 0) return -1;   // sem retorno de eco = sem objeto no alcance
+    if (duration == 0) return -1;
 
     int distance = (int)(duration * 0.0343f / 2.0f);
-
-    if (distance < 2 || distance > 400) return -1;   // fora do alcance útil
+    if (distance < 2 || distance > 400) return -1;
 
     return distance;
 }

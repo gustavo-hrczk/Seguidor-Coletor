@@ -34,12 +34,13 @@
 //   Motor direito (montagem padrão):
 //     valor positivo = frente | valor negativo = ré
 //   Essa assimetria é compensada internamente — não altere sem revisar move()
-#define PIN_IN1 2    // Motor direito  — sentido 1 (L298N: IN1)
-#define PIN_IN2 4    // Motor direito  — sentido 2 (L298N: IN2)
-#define PIN_IN3 5    // Motor esquerdo — sentido 1 (L298N: IN3)
-#define PIN_IN4 7    // Motor esquerdo — sentido 2 (L298N: IN4)
+#define PIN_IN1 4    // Motor direito  — sentido 1 (L298N: IN1)
+#define PIN_IN2 2    // Motor direito  — sentido 2 (L298N: IN2)
+#define PIN_IN3 7    // Motor esquerdo — sentido 1 (L298N: IN3)
+#define PIN_IN4 6    // Motor esquerdo — sentido 2 (L298N: IN4)
 #define PIN_ENA 3    // PWM motor esquerdo — Timer 2 do UNO
-#define PIN_ENB 6    // PWM motor direito  — Timer 0 do UNO
+#define PIN_ENB 5    // PWM motor direito  — Timer 0 do UNO
+//Portas PWM Suportadas: 3, 5, 6, 9, 10, 11 (UNO)
 
 // --- Sensores de linha (QTR-1 analógico × 6) ---
 // Disposição física da esquerda para a direita do robô.

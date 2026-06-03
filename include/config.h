@@ -63,8 +63,8 @@
 //   → reduza MOTOR_TRIM_DIR para 0.93 ou aumente MOTOR_TRIM_ESQ para 1.07
 // ============================================================================
 
-#define MOTOR_TRIM_DIR  0.80f   // fator de correção do motor direito (0.80–1.20)
-#define MOTOR_TRIM_ESQ  1.20f   // fator de correção do motor esquerdo  (0.80–1.20)
+#define MOTOR_TRIM_DIR  0.90f   // fator de correção do motor direito (0.80–1.20)
+#define MOTOR_TRIM_ESQ  1.05f   // fator de correção do motor esquerdo  (0.80–1.20)
 
 
 // ============================================================================
@@ -80,20 +80,20 @@
 // Para ajuste fino de situações específicas, use os OFFSETS abaixo.
 // ============================================================================
 
-#define BASE_SPEED  150   // PWM base — ajuste único para todo o sistema
+#define BASE_SPEED  180   // PWM base — ajuste único para todo o sistema
 
 // Derivadas automáticas — NÃO editar, ajustar apenas BASE_SPEED
 #define VELOCITY_GLOBAL      BASE_SPEED
-#define SPEED_ERROR_LOW      BASE_SPEED
-#define SPEED_ERROR_MEDIUM   BASE_SPEED
-#define SPEED_ERROR_HIGH     BASE_SPEED
+#define SPEED_ERROR_LOW      BASE_SPEED -10
+#define SPEED_ERROR_MEDIUM   BASE_SPEED -20
+#define SPEED_ERROR_HIGH     BASE_SPEED -30
 
 // Offsets opcionais para situações específicas (relativo ao BASE_SPEED)
 // Positivo = mais rápido | Negativo = mais lento | 0 = igual ao BASE
 #define SPEED_OFFSET_RECOVERY    -10   // recuperação: um pouco mais lento
 #define SPEED_OFFSET_INTERSECTION -20  // cruzamento: mais lento para controle
 #define SPEED_OFFSET_APPROACH_MED -40  // objeto médio: desacelera
-#define SPEED_OFFSET_APPROACH_SLW -60  // objeto perto: desacelera mais
+#define SPEED_OFFSET_APPROACH_SLW -50  // objeto perto: desacelera mais
 
 // Derivadas com offset — NÃO editar
 #define PWM_SLOW             (BASE_SPEED + SPEED_OFFSET_RECOVERY)
@@ -102,14 +102,14 @@
 #define APPROACH_SPEED_SLOW   (BASE_SPEED + SPEED_OFFSET_APPROACH_SLW)
 
 // PWM mínimo para vencer atrito estático — independente do BASE_SPEED
-#define PWM_MIN_DEADZONE  160
+#define PWM_MIN_DEADZONE  140
 
 
 // ============================================================================
 // 4. SENSOR DE LINHA
 // ============================================================================
 
-#define THRESHOLD_LINE_SENSOR  350
+#define THRESHOLD_LINE_SENSOR  635
 
 
 // ============================================================================
@@ -126,11 +126,11 @@
 //   Pista grande / alta velocidade:   Kp=1.2–1.5  Kd=0.4–0.6
 // ============================================================================
 
-#define PD_KP          1.2f
-#define PD_KD          0.2f
+#define PD_KP          1.0f
+#define PD_KD          0.7f
 #define PD_SAMPLE_MS    10
 
-#define PD_MIN_INNER_SPEED  80
+#define PD_MIN_INNER_SPEED  100
 
 
 // ============================================================================

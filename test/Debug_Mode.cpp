@@ -35,22 +35,16 @@ void testMotors() {
         delay(500);
     }
 
-    // Curvas compensadas com os três fatores do config
-    struct { const __FlashStringHelper* label; float factor; } curves[] = {
-        { F("CURVA SUAVE  (0.9)"), CURVE_COMPENSATION_LIGHT  },
-        { F("CURVA MEDIA  (0.8)"), CURVE_COMPENSATION_MEDIUM },
-        { F("CURVA AGUDA  (0.6)"), CURVE_COMPENSATION_SHARP  },
+    // Testes de curvas (arco suave com um motor)
+    struct { const __FlashStringHelper* label; MotorController::Direction dir; } curveTests[] = {
+        { F("CURVA SUAVE (50% vel)"),  MotorController::CURVE_LEFT  },
+        { F("CURVA SUAVE (50% vel)"),  MotorController::CURVE_RIGHT },
     };
 
-    for (auto& c : curves) {
-        Serial.print(F("[Motor] ESQ ")); Serial.print(c.label); Serial.println(F("..."));
-        motor.curveCompensated(MotorController::TURN_LEFT, VELOCITY_GLOBAL, c.factor);
-        delay(1500);
-        motor.stop();
-        delay(300);
-
-        Serial.print(F("[Motor] DIR ")); Serial.print(c.label); Serial.println(F("..."));
-        motor.curveCompensated(MotorController::TURN_RIGHT, VELOCITY_GLOBAL, c.factor);
+    Serial.println(F("\n--- Testando curvas (um motor ativo) ---"));
+    for (auto& c : curveTests) {
+        Serial.print(F("[Motor] ")); Serial.print(c.label); Serial.println(F("..."));
+        motor.move(c.dir, (uint8_t)(VELOCITY_GLOBAL * 0.5f));
         delay(1500);
         motor.stop();
         delay(300);
@@ -94,8 +88,6 @@ void testLineSensors() {
                 case LineSensor::CURVE_LIGHT:   label = F("CURVA-SUAVE");    break;
                 case LineSensor::CURVE_MEDIUM:  label = F("CURVA-MEDIA");    break;
                 case LineSensor::CURVE_SHARP:   label = F("CURVA-AGUDA");    break;
-                case LineSensor::TURN_LEFT_90:  label = F("T-ESQ");          break;
-                case LineSensor::TURN_RIGHT_90: label = F("T-DIR");          break;
                 case LineSensor::INTERSECTION:  label = F("INTERSECCAO");    break;
                 case LineSensor::LINE_LOST:     label = F("!! PERDIDA !!");  break;
                 default:                        label = F("?");              break;

@@ -7,15 +7,23 @@
 // ============================================================================
 // MotorController — controle dos motores DC via driver L298N
 //
-// Compensação de assimetria:
-//   MOTOR_TRIM_ESQ e MOTOR_TRIM_DIR (config.h) aplicam um fator
-//   multiplicativo individual por motor em setMotorSpeed().
-//   Isso garante que BASE_SPEED nos dois motores produza
-//   velocidades físicas iguais, corrigindo desvio de linha reta.
+// Trim de assimetria:
+//   MOTOR_TRIM_DIR e MOTOR_TRIM_ESQ (config.h §2) aplicam fator
+//   multiplicativo individual dentro de setMotorSpeed(), garantindo
+//   que BASE_SPEED produza velocidades físicas iguais nos dois lados.
 //
 // Fonte única de velocidade:
-//   Todos os métodos recebem valores derivados de BASE_SPEED (config.h).
-//   Alterar BASE_SPEED recalibra o sistema inteiro proporcionalmente.
+//   Todos os métodos recebem valores derivados de BASE_SPEED (config.h §3).
+//   Nunca passar valores arbitrários — usar as constantes derivadas.
+//
+// Controlador PID:
+//   followLine() implementa PID completo com termo integral.
+//   Estado interno: _prevError, _integral, _lastPDTime.
+//   resetPD() zera os três — obrigatório ao retomar seguimento.
+//
+// Modos de curva:
+//   TURN_*:  giro no eixo (motores opostos) — raio zero, preciso
+//   CURVE_*: arco com um motor parado — raio maior, menor consumo
 // ============================================================================
 
 class MotorController {
@@ -25,29 +33,36 @@ public:
         STOP        = 0,
         FORWARD     = 1,
         BACKWARD    = 2,
-        TURN_LEFT   = 3,   // giro no eixo — manobras e recuperação
-        TURN_RIGHT  = 4,   // giro no eixo — manobras e recuperação
-        CURVE_LEFT  = 5,   // arco suave — motor direito ativo, esquerdo parado
-        CURVE_RIGHT = 6    // arco suave — motor esquerdo ativo, direito parado
+        TURN_LEFT   = 3,
+        TURN_RIGHT  = 4,
+        CURVE_LEFT  = 5,
+        CURVE_RIGHT = 6
     };
 
     MotorController();
+
+    // Configura pinos L298N como OUTPUT e para os motores
     void initialize();
 
     // Controle direto por motor (-255..+255).
-    // Aplica MOTOR_TRIM_* antes de enviar ao hardware.
-    void setMotorSpeed(int speedRight, int speedLeft);
+    // Aplica trim e deadzone antes de enviar ao hardware.
+    // Ponto de entrada de todos os outros métodos.
+    void setMotorSpeed(int speedLeft, int speedRight);
 
-    // Movimentos predefinidos com velocidade uniforme
+    // Movimento predefinido com velocidade uniforme nos dois motores
     void move(Direction direction, uint8_t speed = VELOCITY_GLOBAL);
 
+    // Para ambos os motores imediatamente
     void stop();
 
-    // Controlador PD de seguimento de linha.
-    // Chame a cada ciclo do loop durante STATE_FOLLOWING.
+    // Controlador PID de seguimento de linha.
+    // Chamar uma vez por ciclo em STATE_FOLLOWING.
+    // @param linePosition  saída de LineSensor::getLinePosition() (-1.0..+1.0)
+    // @param baseSpeed     BASE_SPEED ou derivada — nunca valor arbitrário
     void followLine(float linePosition, uint8_t baseSpeed = VELOCITY_GLOBAL);
 
-    // Zera estado PD — obrigatório ao retomar seguimento após qualquer parada
+    // Zera _prevError, _integral e _lastPDTime.
+    // Obrigatório ao retomar seguimento após parada, coleta ou recuperação.
     void resetPD();
 
     int  getLeftSpeed()  const { return _currentLeft;  }
@@ -57,13 +72,16 @@ public:
 private:
     int           _currentLeft;
     int           _currentRight;
-    float         _prevError;
-    unsigned long _lastPDTime;
 
-    // Aplica MOTOR_TRIM e garante deadzone antes de enviar ao hardware
-    int  applyTrimRight(int speed)  const;
-    int  applyTrimLeft(int speed) const;
+    float         _prevError;    // erro do ciclo anterior — termo derivativo
+    float         _integral;     // acumulador de erro — termo integral
+    unsigned long _lastPDTime;   // timestamp da última execução do PID
 
+    // Aplica MOTOR_TRIM_* e deadzone por motor
+    int  applyTrimLeft(int speed)  const;
+    int  applyTrimRight(int speed) const;
+
+    // Traduz velocidade com sinal para pinos L298N e PWM
     void setPinDirection(int in1, int in2, int pwmPin, int speed);
 };
 

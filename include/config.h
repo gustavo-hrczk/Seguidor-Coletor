@@ -2,14 +2,17 @@
 #define CONFIG_H
 
 // ============================================================================
-// CONFIGURAÇÃO CENTRAL DO ROBÔ — SEGUIDOR COLETOR
+// config.h — Configuração central do Robô Seguidor Coletor
 //
-// Organização das seções:
+// Arquivo único de configuração. Alterar um valor aqui afeta todos os
+// módulos que o consomem. Consulte CONFIG_INDEX.md para referência completa.
+//
+// Seções:
 //   1. Pinos de hardware
-//   2. Calibração dos motores (EDITAR AQUI para corrigir assimetria)
-//   3. Velocidade base única
+//   2. Calibração dos motores
+//   3. Velocidade base
 //   4. Sensor de linha
-//   5. Controlador PD
+//   5. Controlador PID
 //   6. Recuperação de linha
 //   7. Detecção de cruzamentos
 //   8. Sensor ultrassônico
@@ -23,13 +26,19 @@
 // 1. PINOS DE HARDWARE
 // ============================================================================
 
-#define PIN_IN1 5    // Motor esquerdo  — sentido 1
-#define PIN_IN2 7    // Motor esquerdo  — sentido 2
-#define PIN_IN3 2    // Motor direito — sentido 1
-#define PIN_IN4 4    // Motor direito — sentido 2
-#define PIN_ENA 6    // PWM motor esquerdo
-#define PIN_ENB 3    // PWM motor direito
+// --- Driver de motor L298N ---
+// PIN_IN1/IN2: controlam sentido do motor ligado ao canal ENB
+// PIN_IN3/IN4: controlam sentido do motor ligado ao canal ENA
+#define PIN_IN1 5
+#define PIN_IN2 7
+#define PIN_IN3 2
+#define PIN_IN4 4
+#define PIN_ENA 6    // PWM canal A — Timer 1
+#define PIN_ENB 3    // PWM canal B — Timer 2
 
+// --- Sensores de linha QTR-1 analógico × 6 ---
+// Disposição: S1 = extrema esquerda … S6 = extrema direita
+// Pesos do centro de massa ponderado: S1=-5 S2=-3 S3=-1 S4=+1 S5=+3 S6=+5
 #define PIN_S1 A0
 #define PIN_S2 A1
 #define PIN_S3 A2
@@ -37,104 +46,125 @@
 #define PIN_S5 A4
 #define PIN_S6 A5
 
+// --- Sensor ultrassônico HC-SR04 ---
 #define PIN_TRIGGER 12
 #define PIN_ECHO    13
-#define PIN_SERVO   9
+
+// --- Servo SG90 ---
+#define PIN_SERVO 9
 
 
 // ============================================================================
 // 2. CALIBRAÇÃO DOS MOTORES
 //
-// Problema: motores TT com assimetria física giram em velocidades diferentes
-// mesmo recebendo o mesmo PWM, causando desvio em linha reta.
+// Motores TT apresentam assimetria física: mesmo recebendo o mesmo PWM,
+// giram em velocidades ligeiramente diferentes, causando desvio em linha reta.
 //
-// Solução: fatores de trim individuais por motor.
-//   1.00 = sem correção (neutro)
-//   > 1.0 = aumenta velocidade deste motor
-//   < 1.0 = reduz velocidade deste motor
+// Solução: fator de trim multiplicativo individual por motor.
+//   1.00 = neutro (sem correção)
+//   > 1.0 = aumenta a velocidade efetiva deste motor
+//   < 1.0 = reduz a velocidade efetiva deste motor
+//
+// Perspectiva de referência: olhando o robô de cima com a frente
+// apontando para longe. ESQ = lado esquerdo, DIR = lado direito.
 //
 // Como calibrar:
-//   1. Coloque o robô em superfície plana sem linha
-//   2. Ajuste MOTOR_TRIM_ESQ e MOTOR_TRIM_DIR até andar reto
-//   3. Comece com pequenos ajustes (ex: 0.95 ou 1.05)
-//   4. Salve os valores que funcionaram — não altere depois
-//
-// Exemplo: robô desvia para a direita → motor direito está mais rápido
-//   → reduza MOTOR_TRIM_DIR para 0.93 ou aumente MOTOR_TRIM_ESQ para 1.07
+//   1. Superfície plana, sem linha, ~1 metro de distância
+//   2. Ajuste um fator de cada vez em passos de 0.02
+//   3. Robô desvia para a direita → motor DIR está mais rápido
+//      → reduza MOTOR_TRIM_DIR ou aumente MOTOR_TRIM_ESQ
+//   4. Registre os valores validados abaixo
 // ============================================================================
 
-#define MOTOR_TRIM_DIR  0.90f   // fator de correção do motor direito (0.80–1.20)
-#define MOTOR_TRIM_ESQ  1.05f   // fator de correção do motor esquerdo  (0.80–1.20)
+#define MOTOR_TRIM_DIR  1.00f   // fator de correção motor DIREITO  (0.80–1.20)
+#define MOTOR_TRIM_ESQ  0.80f   // fator de correção motor ESQUERDO (0.80–1.20)
 
 
 // ============================================================================
-// 3. VELOCIDADE BASE ÚNICA
+// 3. VELOCIDADE BASE
 //
-// FONTE DA VERDADE para todas as velocidades do sistema.
-// Todos os outros valores de velocidade são derivados deste.
+// BASE_SPEED é a única constante de velocidade a editar diretamente.
+// Todas as demais são derivadas automaticamente via offsets relativos,
+// garantindo que o sistema inteiro se recalibre ao mudar um único valor.
 //
-//   BASE_SPEED        → velocidade padrão de operação
-//   BASE_SPEED * 0.xx → velocidades derivadas (não editar as derivadas)
-//
-// Alterar BASE_SPEED recalibra todo o sistema proporcionalmente.
-// Para ajuste fino de situações específicas, use os OFFSETS abaixo.
+// Offsets: positivo = mais rápido | negativo = mais lento
 // ============================================================================
 
-#define BASE_SPEED  180   // PWM base — ajuste único para todo o sistema
+#define BASE_SPEED  200   // PWM base — fonte única da verdade de velocidade
 
-// Derivadas automáticas — NÃO editar, ajustar apenas BASE_SPEED
-#define VELOCITY_GLOBAL      BASE_SPEED
-#define SPEED_ERROR_LOW      BASE_SPEED -10
-#define SPEED_ERROR_MEDIUM   BASE_SPEED -20
-#define SPEED_ERROR_HIGH     BASE_SPEED -30
+// Derivadas diretas — NÃO editar
+#define VELOCITY_GLOBAL  BASE_SPEED
 
-// Offsets opcionais para situações específicas (relativo ao BASE_SPEED)
-// Positivo = mais rápido | Negativo = mais lento | 0 = igual ao BASE
-#define SPEED_OFFSET_RECOVERY    -10   // recuperação: um pouco mais lento
-#define SPEED_OFFSET_INTERSECTION -20  // cruzamento: mais lento para controle
-#define SPEED_OFFSET_APPROACH_MED -40  // objeto médio: desacelera
-#define SPEED_OFFSET_APPROACH_SLW -50  // objeto perto: desacelera mais
+// Offsets situacionais relativos ao BASE_SPEED
+#define SPEED_OFFSET_RECOVERY     -10   // giro de recuperação de linha
+#define SPEED_OFFSET_INTERSECTION -20   // passagem pelo cruzamento do 8
+#define SPEED_OFFSET_APPROACH_MED -70   // objeto detectado entre LONG e SHORT
+#define SPEED_OFFSET_APPROACH_SLW -90   // objeto entre SHORT e CONTACT
 
 // Derivadas com offset — NÃO editar
-#define PWM_SLOW             (BASE_SPEED + SPEED_OFFSET_RECOVERY)
-#define SPEED_INTERSECTION   (BASE_SPEED + SPEED_OFFSET_INTERSECTION)
-#define APPROACH_SPEED_MEDIUM (BASE_SPEED + SPEED_OFFSET_APPROACH_MED)
-#define APPROACH_SPEED_SLOW   (BASE_SPEED + SPEED_OFFSET_APPROACH_SLW)
+#define PWM_SLOW               (BASE_SPEED + SPEED_OFFSET_RECOVERY)
+#define SPEED_INTERSECTION     (BASE_SPEED + SPEED_OFFSET_INTERSECTION)
+#define APPROACH_SPEED_MEDIUM  (BASE_SPEED + SPEED_OFFSET_APPROACH_MED)
+#define APPROACH_SPEED_SLOW    (BASE_SPEED + SPEED_OFFSET_APPROACH_SLW)
+#define APPROACH_SPEED_FAST    BASE_SPEED
 
-// PWM mínimo para vencer atrito estático — independente do BASE_SPEED
+// PWM mínimo para vencer atrito estático dos motores TT.
+// Abaixo deste valor o motor recebe sinal mas não gira com carga.
+// Independente do BASE_SPEED — calibrado fisicamente.
 #define PWM_MIN_DEADZONE  140
 
 
 // ============================================================================
 // 4. SENSOR DE LINHA
+//
+// Convenção (QTR analógico, linha BRANCA sobre fundo PRETO):
+//   Linha branca → analogRead BAIXO (~50–300)
+//   Fundo preto  → analogRead ALTO  (~700–1023)
+//   Sensor ATIVO quando raw <= THRESHOLD_LINE_SENSOR
+//
+// Calibrar com o Teste de Sensor (test_components) na pista real.
+// Valor recomendado = ponto médio entre max_linha e min_fundo.
 // ============================================================================
 
-#define THRESHOLD_LINE_SENSOR  635
+#define THRESHOLD_LINE_SENSOR  629
 
 
 // ============================================================================
-// 5. CONTROLADOR PD DE SEGUIMENTO DE LINHA
+// 5. CONTROLADOR PID
 //
-// Fórmula: correction = Kp * erro + Kd * (erro - erro_anterior)
+// Fórmula: correction = Kp*erro + Kd*(erro - erro_anterior) + Ki*∫erro·dt
 //
-// Motor externo à curva: mantém baseSpeed constante
-// Motor interno à curva: baseSpeed × (1 - |correction|), mínimo PD_MIN_INNER_SPEED
+// Motor externo à curva: BASE_SPEED constante (preserva velocidade de avanço)
+// Motor interno à curva: BASE_SPEED × (1 - |correction|), piso PD_MIN_INNER_SPEED
 //
-// Referência de ajuste por tamanho de pista:
-//   Pista pequena / baixa velocidade: Kp=0.4–0.6  Kd=0.1–0.2
-//   Pista normal:                     Kp=0.8–1.0  Kd=0.3–0.4
-//   Pista grande / alta velocidade:   Kp=1.2–1.5  Kd=0.4–0.6
+// Ajuste dos ganhos:
+//   Kp: reatividade à posição — aumentar = reage mais rápido
+//   Kd: amortecimento — aumentar = menos serpenteia em reta
+//   Ki: corrige deriva acumulada — começar com 0.02, aumentar até 0.08
+//       muito alto = oscila após curvas (windup)
+//
+// Anti-windup do integral:
+//   PID_INTEGRAL_DEADZONE: dentro de ±valor, integral é zerado (ruído ignorado)
+//   PID_INTEGRAL_MAX:      teto absoluto do acumulador
 // ============================================================================
 
-#define PD_KP          1.0f
-#define PD_KD          0.7f
-#define PD_SAMPLE_MS    10
+#define PD_KP  0.8f
+#define PD_KD  1.0f
+#define PD_KI  0.03f
+#define PD_SAMPLE_MS          10     // intervalo entre cálculos (ms) — 100 Hz
 
-#define PD_MIN_INNER_SPEED  100
+#define PD_MIN_INNER_SPEED    140     // piso do motor interno em curvas
+#define PID_INTEGRAL_DEADZONE 0.10f  // zona morta do integral (±10% da escala)
+#define PID_INTEGRAL_MAX      1.0f   // teto anti-windup do acumulador
 
 
 // ============================================================================
 // 6. RECUPERAÇÃO DE LINHA PERDIDA
+//
+// Estratégia em dois estágios:
+//   Estágio 1 (0 → RECOVERY_SPIN_MS):   gira na última direção conhecida
+//   Estágio 2 (→ RECOVERY_TIMEOUT_MS):  gira na direção oposta
+//   Timeout:                             STATE_STOPPED
 // ============================================================================
 
 #define RECOVERY_SPIN_MS     300
@@ -143,54 +173,74 @@
 
 // ============================================================================
 // 7. DETECÇÃO DE CRUZAMENTOS
+//
+// Percurso em formato de 8 tem um cruzamento central.
+// Quando >= CROSS_MIN_SENSORS_X sensores estão ativos simultaneamente,
+// o robô está sobre o cruzamento e deve passar reto.
 // ============================================================================
 
 #define CROSS_MIN_SENSORS_X  5
 
+
 // ============================================================================
-// 8. SENSOR ULTRASSÔNICO (HC-SR04)
+// 8. SENSOR ULTRASSÔNICO HC-SR04
+//
+// Fases de aproximação:
+//   OBJECT_NOT_DETECTED : sem leitura estável
+//   PHASE_1_DISTANT     : dist >= ULTRASONIC_DISTANCE_LONG  → velocidade normal
+//   PHASE_2_APPROACHING : dist >= ULTRASONIC_DISTANCE_SHORT → desacelera
+//   PHASE_3_CONTACT     : dist <  ULTRASONIC_DISTANCE_SHORT → quase parado
+//   Gatilho de coleta   : dist <= ULTRASONIC_DISTANCE_CONTACT → STATE_COLLECTING
+//
+// ULTRASONIC_TIMEOUT_US: timeout do pulseIn em µs.
+//   10000µs cobre até ~170cm — suficiente para o projeto.
+//   Reduzir melhora responsividade a custo de alcance máximo.
 // ============================================================================
 
-#define ULTRASONIC_DISTANCE_LONG     25
-#define ULTRASONIC_DISTANCE_SHORT    20
-#define ULTRASONIC_DISTANCE_CONTACT   4
-#define ULTRASONIC_NOISE_TOLERANCE   20
-#define ULTRASONIC_TIMEOUT_US     10000
-#define SENSOR_FILTER_CYCLES          2
+#define ULTRASONIC_DISTANCE_LONG     30   // cm — início da fase 2
+#define ULTRASONIC_DISTANCE_SHORT    20   // cm — início da fase 3
+#define ULTRASONIC_DISTANCE_CONTACT   4   // cm — gatilho de coleta
+#define ULTRASONIC_NOISE_TOLERANCE   20   // % de variação tolerada entre leituras
+#define ULTRASONIC_TIMEOUT_US      5000   // µs — timeout do pulseIn
+#define SENSOR_FILTER_CYCLES          2   // leituras consecutivas para validar
 
 
 // ============================================================================
 // 9. GARRA (SG90)
+//
+// O servo move grau a grau (SERVO_STEP_DELAY_MS entre cada passo) para
+// evitar tranco mecânico. Após atingir o ângulo alvo, aguarda
+// SERVO_STABILIZATION_TIME e executa detach() — elimina aquecimento
+// causado por PWM contínuo sem carga, problema recorrente no SG90.
+//
+// Ângulos: evitar 0° — é o limite mecânico do SG90 e pode travar.
 // ============================================================================
 
-#define SERVO_ANGLE_OPEN          20
-#define SERVO_ANGLE_CLOSED       170
-#define SERVO_STEP_DELAY_MS       10
-#define SERVO_STABILIZATION_TIME 400
-#define GRIPPER_STABLE_TIME_MS   300
-#define GRIPPER_HOLD_TIME_MS    3000
+#define SERVO_ANGLE_OPEN          20   // graus — posição aberta
+#define SERVO_ANGLE_CLOSED       170   // graus — posição fechada
+#define SERVO_STEP_DELAY_MS       10   // ms entre cada grau (menor = mais rápido)
+#define SERVO_STABILIZATION_TIME 400   // ms aguardando antes do detach()
 
 
 // ============================================================================
 // 10. COLETA AUTÔNOMA
 //
-// Velocidades de manobra também derivadas do BASE_SPEED.
+// Parâmetros do ciclo STATE_COLLECTING.
+// Limiares de distância para troca de velocidade de aproximação (cm).
+// Tempos de manobra: calibrar na pista com o peso real do robô.
 // ============================================================================
 
-#define APPROACH_SPEED_FAST   BASE_SPEED
+#define APPROACH_DIST_LONG    30   // cm — troca FAST → MEDIUM
+#define APPROACH_DIST_MEDIUM  20   // cm — troca MEDIUM → SLOW
 
-#define APPROACH_DIST_LONG    20
-#define APPROACH_DIST_MEDIUM  10
+#define MANEUVER_SPEED_LOADED    BASE_SPEED - 20   // PWM com objeto na garra
+#define MANEUVER_SPEED_UNLOADED  BASE_SPEED - 40   // PWM no retorno sem objeto
 
-#define MANEUVER_SPEED_LOADED    140
-#define MANEUVER_SPEED_UNLOADED  100
-
-#define STRAFE_LOADED_MS    700
-#define STRAFE_UNLOADED_MS  350
-#define TURN_90_LOADED_MS   700
-#define TURN_90_UNLOADED_MS 300
-#define COLLECT_STOP_DELAY  300
-#define COLLECT_CYCLE_DURATION  120000
+#define STRAFE_LOADED_MS     600   // ms de avanço lateral com objeto
+#define STRAFE_UNLOADED_MS   400   // ms de recuo lateral sem objeto
+#define TURN_90_LOADED_MS    400   // ms de giro 90° com carga
+#define TURN_90_UNLOADED_MS  300   // ms de giro 90° sem carga
+#define COLLECT_STOP_DELAY   300   // ms de pausa entre etapas da manobra
 
 
 // ============================================================================
@@ -198,6 +248,9 @@
 // ============================================================================
 
 #define BAUD_RATE   9600
+
+// DEBUG_MODE true  → todos os módulos imprimem no Serial
+// DEBUG_MODE false → código de log removido em compilação (libera memória Flash)
 #define DEBUG_MODE  true
 
 #endif // CONFIG_H

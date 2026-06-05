@@ -1,51 +1,42 @@
 #include "GripperServo.h"
 
-// Alias local para o tempo de estabilização definido no config.h.
-// Usado após o servo atingir o ângulo alvo antes de desligar o PWM.
+// Alias local — evita repetir SERVO_STABILIZATION_TIME no código
 static const uint16_t DETACH_DELAY_MS = SERVO_STABILIZATION_TIME;
 
 // ============================================================================
 // Construtor
-// Inicializa o estado lógico como OPEN e registra o ângulo inicial.
-// O servo físico NÃO é movimentado aqui — isso ocorre em initialize().
+// Estado inicial OPEN com ângulo registrado — servo não é movido aqui.
 // ============================================================================
 GripperServo::GripperServo()
     : _state(OPEN), _currentAngle(SERVO_ANGLE_OPEN) {}
 
 // ============================================================================
 // initialize()
-// Conecta o servo, posiciona em OPEN, aguarda estabilização mecânica
-// e desliga o sinal PWM. Deve ser chamado uma vez no setup().
+// Conecta o servo, posiciona em ABERTO, aguarda estabilização e desliga PWM.
 // ============================================================================
 void GripperServo::initialize() {
     _servo.attach(PIN_SERVO);
-    _servo.write(SERVO_ANGLE_OPEN);     // posiciona fisicamente em OPEN
+    _servo.write(SERVO_ANGLE_OPEN);
     _currentAngle = SERVO_ANGLE_OPEN;
     _state        = OPEN;
-    delay(DETACH_DELAY_MS);             // aguarda o servo assentar na posição
-    _servo.detach();                    // desliga PWM — evita vibração em repouso
+    delay(DETACH_DELAY_MS);
+    _servo.detach();
     if (DEBUG_MODE) Serial.println(F("[Gripper] Inicializado - ABERTO"));
 }
 
 // ============================================================================
-// open()
-// Abre a garra movendo para SERVO_ANGLE_OPEN.
-// Ignorado silenciosamente se a garra já estiver aberta (evita movimento desnecessário).
+// open() / close()
+// Guards de estado evitam movimento desnecessário quando já na posição.
 // ============================================================================
 void GripperServo::open() {
-    if (_state == OPEN) return;         // guarda de estado — não reexecuta
+    if (_state == OPEN) return;
     moveToAngle(SERVO_ANGLE_OPEN);
     _state = OPEN;
     if (DEBUG_MODE) Serial.println(F("[Gripper] ABERTO"));
 }
 
-// ============================================================================
-// close()
-// Fecha a garra movendo para SERVO_ANGLE_CLOSED.
-// Ignorado silenciosamente se a garra já estiver fechada.
-// ============================================================================
 void GripperServo::close() {
-    if (_state == CLOSED) return;       // guarda de estado — não reexecuta
+    if (_state == CLOSED) return;
     moveToAngle(SERVO_ANGLE_CLOSED);
     _state = CLOSED;
     if (DEBUG_MODE) Serial.println(F("[Gripper] FECHADO"));
@@ -53,9 +44,6 @@ void GripperServo::close() {
 
 // ============================================================================
 // emergencyStop()
-// Desliga o PWM imediatamente sem aguardar posição final.
-// Coloca o estado em ERROR — open() e close() não funcionarão após isso.
-// Use apenas em situações de falha crítica.
 // ============================================================================
 void GripperServo::emergencyStop() {
     if (_servo.attached()) _servo.detach();
@@ -67,37 +55,41 @@ void GripperServo::emergencyStop() {
 // moveToAngle()
 // Move o servo grau a grau até o ângulo alvo.
 //
-// Por que grau a grau?
-//   Mover diretamente para o ângulo final causa tranco mecânico e pode
-//   soltar ou danificar o objeto na garra. O movimento gradual também
-//   distribui a carga no motor ao longo do tempo.
+// Por que grau a grau:
+//   Movimento brusco causa tranco mecânico e pode soltar o objeto.
+//   O passo unitário distribui a carga ao longo do tempo.
 //
-// Por que reativar o attach antes de mover?
-//   O detach() desliga o PWM após cada movimento. Para mover novamente,
-//   é necessário reativar o sinal — o write(_currentAngle) informa ao
-//   driver a posição atual antes de iniciar o novo movimento.
+// Por que reativar attach antes de mover:
+//   detach() desliga o PWM após cada movimento para eliminar aquecimento.
+//   Para mover novamente é necessário reativar o sinal. O write() inicial
+//   informa ao driver a posição atual antes de iniciar o novo movimento.
+//
+// Correção de underflow:
+//   _currentAngle é uint8_t. Sem a variável local int, decrementar abaixo
+//   de 0 causaria underflow para 255, prendendo o while em loop infinito.
+//   A iteração usa int local — _currentAngle só é atualizado ao final.
 // ============================================================================
 void GripperServo::moveToAngle(uint8_t target) {
-    // Garante que o alvo está dentro dos limites físicos definidos no config
     target = constrain(target, SERVO_ANGLE_OPEN, SERVO_ANGLE_CLOSED);
 
-    // Reativa PWM se estava desligado (estado normal entre comandos)
     if (!_servo.attached()) {
         _servo.attach(PIN_SERVO);
-        _servo.write(_currentAngle);    // informa posição atual ao driver
-        delay(50);                      // aguarda o driver sincronizar
-    }
-
-    // Define direção do movimento: +1 para aumentar ângulo, -1 para diminuir
-    const int8_t step = (_currentAngle < target) ? 1 : -1;
-
-    // Move um grau por vez, aguardando SERVO_STEP_DELAY_MS entre cada passo
-    while (_currentAngle != target) {
-        _currentAngle += step;
         _servo.write(_currentAngle);
-        delay(SERVO_STEP_DELAY_MS);     // controla velocidade do movimento
+        delay(50);
     }
 
-    delay(DETACH_DELAY_MS);             // aguarda assentar na posição final
-    _servo.detach();                    // desliga PWM — elimina aquecimento em repouso
+    // Iteração com int local — previne underflow de uint8_t ao decrementar
+    int current = (int)_currentAngle;
+    int tgt     = (int)target;
+    int step    = (current < tgt) ? 1 : -1;
+
+    while (current != tgt) {
+        current += step;
+        _servo.write(current);
+        delay(SERVO_STEP_DELAY_MS);
+    }
+
+    _currentAngle = (uint8_t)current;   // sincroniza ângulo registrado
+    delay(DETACH_DELAY_MS);
+    _servo.detach();
 }

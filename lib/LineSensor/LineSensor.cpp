@@ -1,28 +1,46 @@
 #include "LineSensor.h"
 
+// Pesos simétricos: esquerda negativa, direita positiva.
+// pos = 0 quando S3 e S4 leem a linha com mesma intensidade.
 const int LineSensor::WEIGHTS[6] = { -5, -3, -1, 1, 3, 5 };
 
+// ============================================================================
+// Construtor
+// ============================================================================
 LineSensor::LineSensor() : _lastDir(DIR_CENTER) {
     memset(&_state, 0, sizeof(SensorState));
 }
 
+// ============================================================================
+// initialize()
+// A0–A5 são INPUT por padrão no Arduino — pinMode explícito documenta
+// a intenção e protege contra reconfiguração acidental por outro módulo.
+// ============================================================================
 void LineSensor::initialize() {
     for (int i = 0; i < 6; i++) {
         pinMode(A0 + i, INPUT);
     }
 }
 
+// ============================================================================
+// readSensors()
+// Leitura direta, sem filtro — reatividade máxima para seguimento.
+// Atualiza estado interno e retorna referência constante (sem cópia).
+// ============================================================================
 const LineSensor::SensorState& LineSensor::readSensors() {
     _state.activeCount = 0;
 
     for (int i = 0; i < 6; i++) {
         _state.raw[i]    = analogRead(A0 + i);
+        // Linha branca reflete mais luz → tensão menor → raw baixo
         _state.active[i] = (_state.raw[i] <= THRESHOLD_LINE_SENSOR);
         if (_state.active[i]) _state.activeCount++;
     }
 
     _state.position = computePosition();
 
+    // Atualiza última direção conhecida apenas com sensores ativos.
+    // Em LINE_LOST, _lastDir é preservado para guiar a recuperação.
     if (_state.activeCount > 0) {
         if      (_state.position < -0.10f) _lastDir = DIR_LEFT;
         else if (_state.position >  0.10f) _lastDir = DIR_RIGHT;
@@ -32,6 +50,20 @@ const LineSensor::SensorState& LineSensor::readSensors() {
     return _state;
 }
 
+// ============================================================================
+// computePosition()
+// Centro de massa ponderado por intensidade de leitura.
+//
+// intensity = THRESHOLD - raw
+//   → sensor no centro da linha: raw mínimo → intensidade alta → mais peso
+//   → sensor na borda da linha:  raw alto   → intensidade baixa → menos peso
+//
+// Resultado: weightedSum / totalWeight em escala -5..+5, dividido por 5
+// para normalizar em -1.0..+1.0.
+//
+// LINE_LOST: retorna ±1.0 na última direção conhecida para manter o PID
+// corrigindo na direção certa durante a manobra de recuperação.
+// ============================================================================
 float LineSensor::computePosition() const {
     if (_state.activeCount == 0) {
         if (_lastDir == DIR_RIGHT) return  1.0f;
@@ -45,7 +77,7 @@ float LineSensor::computePosition() const {
     for (int i = 0; i < 6; i++) {
         if (_state.active[i]) {
             int intensity = THRESHOLD_LINE_SENSOR - _state.raw[i];
-            if (intensity < 1) intensity = 1;
+            if (intensity < 1) intensity = 1;   // peso mínimo 1 na borda
             weightedSum += (long)WEIGHTS[i] * intensity;
             totalWeight += intensity;
         }
@@ -61,23 +93,22 @@ float LineSensor::computePosition() const {
 
 // ============================================================================
 // getLinePattern()
-// Classifica o padrão de navegação para um percurso em formato de 8.
+// Prioridade: INTERSECTION > seguimento por magnitude.
 //
-// Prioridade de classificação:
-//   1. INTERSECTION (5-6 sensores) — cruzamento central do 8
-//      Resposta: passar reto em velocidade reduzida
-//   2. Seguimento por magnitude do desvio (1-4 sensores)
-//      STRAIGHT:      |pos| < 0.25 — limiar ligeiramente alargado para
-//                     absorver ruído de leitura em retas sem mascarar curvas
-//      CURVE_LIGHT:   |pos| 0.25–0.50
-//      CURVE_MEDIUM:  |pos| 0.50–0.75
-//      CURVE_SHARP:   |pos| > 0.75 — curva fechada do 8
+// INTERSECTION (>= CROSS_MIN_SENSORS_X ativos):
+//   Cruzamento central do percurso em 8. O robô passa reto em velocidade
+//   reduzida (SPEED_INTERSECTION) sem alterar a lógica de seguimento.
+//
+// Faixas de seguimento (1–4 sensores ativos):
+//   STRAIGHT     |pos| < 0.25  — absorve ruído em reta sem mascarar curvas
+//   CURVE_LIGHT  |pos| 0.25–0.50
+//   CURVE_MEDIUM |pos| 0.50–0.75
+//   CURVE_SHARP  |pos| > 0.75  — curva fechada do 8
 // ============================================================================
 LineSensor::LinePattern LineSensor::getLinePattern() const {
     if (_state.activeCount == 0)
         return LINE_LOST;
 
-    // Cruzamento central do percurso em 8 — todos ou quase todos os sensores ativos
     if (_state.activeCount >= CROSS_MIN_SENSORS_X)
         return INTERSECTION;
 
@@ -89,6 +120,14 @@ LineSensor::LinePattern LineSensor::getLinePattern() const {
     else                     return CURVE_SHARP;
 }
 
+// ============================================================================
+// printSensorValues()
+// Saída de diagnóstico em uma linha:
+//   [binário 6 sensores] [barra visual -1..+1] posição cnt= raw: ...
+//
+// '#' na barra = posição atual | '|' no centro = zero
+// Essencial para calibrar THRESHOLD_LINE_SENSOR na pista real.
+// ============================================================================
 void LineSensor::printSensorValues() const {
     if (!DEBUG_MODE) return;
 
@@ -105,7 +144,7 @@ void LineSensor::printSensorValues() const {
     bar[idx] = '#';
     bar[21]  = '\0';
 
-    Serial.print(F(" ["));  Serial.print(bar);  Serial.print(F("] "));
+    Serial.print(F(" ["));    Serial.print(bar);            Serial.print(F("] "));
     Serial.print(_state.position, 3);
     Serial.print(F(" cnt=")); Serial.print(_state.activeCount);
     Serial.print(F(" raw:"));

@@ -76,8 +76,43 @@
 //   4. Registre os valores validados abaixo
 // ============================================================================
 
-#define MOTOR_TRIM_DIR  1.00f   // fator de correção motor DIREITO  (0.80–1.20)
-#define MOTOR_TRIM_ESQ  0.80f   // fator de correção motor ESQUERDO (0.80–1.20)
+#define MOTOR_TRIM_DIR  0.90f   // fator de correção motor DIREITO  (0.80–1.20)
+#define MOTOR_TRIM_ESQ  1.05f   // fator de correção motor ESQUERDO (0.80–1.20)
+
+
+// ============================================================================
+// 2b. PROTEÇÃO DOS MOTORES — RAMPAS DE ACELERAÇÃO
+//
+// Motor: Micro Motor com Caixa de Redução 6V — Robocore
+//   Corrente nominal: ~200 mA com carga
+//   Corrente de stall (eixo travado): 1.6 A
+//
+// Problema: inversão brusca de sentido (ex: +180 -> -180 PWM em um ciclo)
+// empurra a corrente instantaneamente em direção ao stall, gerando pico
+// mecânico e elétrico que danifica as engrenagens da caixa de redução.
+// Foi exatamente o que causou a falha durante os testes do main_robo.
+//
+// Solução — duas rampas implementadas internamente em setMotorSpeed():
+//
+//   Rampa de ARRANQUE (0 -> alvo):
+//     Sobe em MOTOR_RAMP_STEPS degraus ao longo de MOTOR_RAMP_UP_MS ms.
+//     Protege arranque a frio e retomada após qualquer parada.
+//
+//   Rampa de INVERSÃO (positivo -> negativo ou vice-versa):
+//     Desce até zero em MOTOR_RAMP_STEPS degraus (MOTOR_RAMP_DOWN_MS ms),
+//     aguarda um ciclo em zero, depois sobe para o novo sentido.
+//     Elimina o pico de corrente reversa que atinge o stall.
+//
+// Calibração para caixa de redução metálica 6V Robocore:
+//   60 ms subida | 40 ms descida | 8 degraus por rampa
+//   Degrau: ~7.5 ms na subida | ~5 ms na descida
+//   Rápido o suficiente para o PID responder (PD_SAMPLE_MS = 10 ms),
+//   seguro o suficiente para não atingir stall nas inversões.
+// ============================================================================
+
+#define MOTOR_RAMP_UP_MS    60   // ms da rampa de arranque (0 -> velocidade alvo)
+#define MOTOR_RAMP_DOWN_MS  40   // ms da rampa antes de inversão de sentido
+#define MOTOR_RAMP_STEPS     8   // número de degraus por rampa
 
 
 // ============================================================================
@@ -90,7 +125,7 @@
 // Offsets: positivo = mais rápido | negativo = mais lento
 // ============================================================================
 
-#define BASE_SPEED  200   // PWM base — fonte única da verdade de velocidade
+#define BASE_SPEED  180   // PWM base — fonte única da verdade de velocidade
 
 // Derivadas diretas — NÃO editar
 #define VELOCITY_GLOBAL  BASE_SPEED
@@ -98,8 +133,8 @@
 // Offsets situacionais relativos ao BASE_SPEED
 #define SPEED_OFFSET_RECOVERY     -10   // giro de recuperação de linha
 #define SPEED_OFFSET_INTERSECTION -20   // passagem pelo cruzamento do 8
-#define SPEED_OFFSET_APPROACH_MED -70   // objeto detectado entre LONG e SHORT
-#define SPEED_OFFSET_APPROACH_SLW -90   // objeto entre SHORT e CONTACT
+#define SPEED_OFFSET_APPROACH_MED -40   // objeto detectado entre LONG e SHORT
+#define SPEED_OFFSET_APPROACH_SLW -50   // objeto entre SHORT e CONTACT
 
 // Derivadas com offset — NÃO editar
 #define PWM_SLOW               (BASE_SPEED + SPEED_OFFSET_RECOVERY)
@@ -126,7 +161,7 @@
 // Valor recomendado = ponto médio entre max_linha e min_fundo.
 // ============================================================================
 
-#define THRESHOLD_LINE_SENSOR  629
+#define THRESHOLD_LINE_SENSOR  635
 
 
 // ============================================================================
@@ -148,12 +183,12 @@
 //   PID_INTEGRAL_MAX:      teto absoluto do acumulador
 // ============================================================================
 
-#define PD_KP  0.8f
-#define PD_KD  1.0f
-#define PD_KI  0.03f
+#define PD_KP                 0.8f
+#define PD_KD                 0.4f
+#define PD_KI                 0.04f
 #define PD_SAMPLE_MS          10     // intervalo entre cálculos (ms) — 100 Hz
 
-#define PD_MIN_INNER_SPEED    140     // piso do motor interno em curvas
+#define PD_MIN_INNER_SPEED    80     // piso do motor interno em curvas
 #define PID_INTEGRAL_DEADZONE 0.10f  // zona morta do integral (±10% da escala)
 #define PID_INTEGRAL_MAX      1.0f   // teto anti-windup do acumulador
 
@@ -197,11 +232,11 @@
 //   Reduzir melhora responsividade a custo de alcance máximo.
 // ============================================================================
 
-#define ULTRASONIC_DISTANCE_LONG     30   // cm — início da fase 2
+#define ULTRASONIC_DISTANCE_LONG     25   // cm — início da fase 2
 #define ULTRASONIC_DISTANCE_SHORT    20   // cm — início da fase 3
 #define ULTRASONIC_DISTANCE_CONTACT   4   // cm — gatilho de coleta
 #define ULTRASONIC_NOISE_TOLERANCE   20   // % de variação tolerada entre leituras
-#define ULTRASONIC_TIMEOUT_US      5000   // µs — timeout do pulseIn
+#define ULTRASONIC_TIMEOUT_US     10000   // µs — timeout do pulseIn
 #define SENSOR_FILTER_CYCLES          2   // leituras consecutivas para validar
 
 
@@ -230,17 +265,17 @@
 // Tempos de manobra: calibrar na pista com o peso real do robô.
 // ============================================================================
 
-#define APPROACH_DIST_LONG    30   // cm — troca FAST → MEDIUM
-#define APPROACH_DIST_MEDIUM  20   // cm — troca MEDIUM → SLOW
+#define APPROACH_DIST_LONG       20   // cm — troca FAST → MEDIUM
+#define APPROACH_DIST_MEDIUM     10   // cm — troca MEDIUM → SLOW
 
-#define MANEUVER_SPEED_LOADED    BASE_SPEED - 20   // PWM com objeto na garra
-#define MANEUVER_SPEED_UNLOADED  BASE_SPEED - 40   // PWM no retorno sem objeto
+#define MANEUVER_SPEED_LOADED    140   // PWM com objeto na garra
+#define MANEUVER_SPEED_UNLOADED  100   // PWM no retorno sem objeto
 
-#define STRAFE_LOADED_MS     600   // ms de avanço lateral com objeto
-#define STRAFE_UNLOADED_MS   400   // ms de recuo lateral sem objeto
-#define TURN_90_LOADED_MS    400   // ms de giro 90° com carga
-#define TURN_90_UNLOADED_MS  300   // ms de giro 90° sem carga
-#define COLLECT_STOP_DELAY   300   // ms de pausa entre etapas da manobra
+#define STRAFE_LOADED_MS         700   // ms de avanço lateral com objeto
+#define STRAFE_UNLOADED_MS       350   // ms de recuo lateral sem objeto
+#define TURN_90_LOADED_MS        700   // ms de giro 90° com carga
+#define TURN_90_UNLOADED_MS      300   // ms de giro 90° sem carga
+#define COLLECT_STOP_DELAY       300   // ms de pausa entre etapas da manobra
 
 
 // ============================================================================

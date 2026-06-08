@@ -8,22 +8,22 @@
 // MotorController — controle dos motores DC via driver L298N
 //
 // Trim de assimetria:
-//   MOTOR_TRIM_DIR e MOTOR_TRIM_ESQ (config.h §2) aplicam fator
-//   multiplicativo individual dentro de setMotorSpeed(), garantindo
-//   que BASE_SPEED produza velocidades físicas iguais nos dois lados.
+//   MOTOR_TRIM_DIR e MOTOR_TRIM_ESQ aplicam fator multiplicativo individual
+//   dentro de setMotorSpeed(), garantindo que BASE_SPEED produza velocidades
+//   físicas iguais nos dois lados.
 //
-// Fonte única de velocidade:
-//   Todos os métodos recebem valores derivados de BASE_SPEED (config.h §3).
-//   Nunca passar valores arbitrários — usar as constantes derivadas.
+// Rampas de proteção (seção 2b do config.h):
+//   Toda mudança de velocidade passa por _applyRamp() antes de chegar ao
+//   hardware. Dois cenários protegidos:
+//     Arranque (0 -> v): sobe em MOTOR_RAMP_STEPS degraus / MOTOR_RAMP_UP_MS
+//     Inversão (+ -> -): desce até 0 em MOTOR_RAMP_DOWN_MS antes de inverter
+//   _appliedLeft/_appliedRight rastreiam a velocidade REAL no hardware,
+//   separada da velocidade LÓGICA solicitada (_currentLeft/_currentRight).
 //
 // Controlador PID:
 //   followLine() implementa PID completo com termo integral.
-//   Estado interno: _prevError, _integral, _lastPDTime.
-//   resetPD() zera os três — obrigatório ao retomar seguimento.
-//
-// Modos de curva:
-//   TURN_*:  giro no eixo (motores opostos) — raio zero, preciso
-//   CURVE_*: arco com um motor parado — raio maior, menor consumo
+//   resetPD() zera _prevError, _integral e _lastPDTime — obrigatório
+//   ao retomar seguimento após parada ou coleta.
 // ============================================================================
 
 class MotorController {
@@ -40,49 +40,46 @@ public:
     };
 
     MotorController();
-
-    // Configura pinos L298N como OUTPUT e para os motores
     void initialize();
 
     // Controle direto por motor (-255..+255).
-    // Aplica trim e deadzone antes de enviar ao hardware.
-    // Ponto de entrada de todos os outros métodos.
+    // Aplica trim, rampa e deadzone antes de enviar ao hardware.
     void setMotorSpeed(int speedLeft, int speedRight);
 
-    // Movimento predefinido com velocidade uniforme nos dois motores
     void move(Direction direction, uint8_t speed = VELOCITY_GLOBAL);
-
-    // Para ambos os motores imediatamente
     void stop();
 
-    // Controlador PID de seguimento de linha.
-    // Chamar uma vez por ciclo em STATE_FOLLOWING.
-    // @param linePosition  saída de LineSensor::getLinePosition() (-1.0..+1.0)
-    // @param baseSpeed     BASE_SPEED ou derivada — nunca valor arbitrário
+    // Controlador PID — chamar uma vez por ciclo em STATE_FOLLOWING
     void followLine(float linePosition, uint8_t baseSpeed = VELOCITY_GLOBAL);
 
-    // Zera _prevError, _integral e _lastPDTime.
-    // Obrigatório ao retomar seguimento após parada, coleta ou recuperação.
+    // Zera _prevError, _integral, _lastPDTime e velocidades aplicadas
     void resetPD();
 
     int  getLeftSpeed()  const { return _currentLeft;  }
     int  getRightSpeed() const { return _currentRight; }
-    bool isMoving()      const { return (_currentLeft != 0 || _currentRight != 0); }
+    bool isMoving()      const { return (_appliedLeft != 0 || _appliedRight != 0); }
 
 private:
-    int           _currentLeft;
-    int           _currentRight;
+    int   _currentLeft;    // velocidade lógica solicitada
+    int   _currentRight;
+    int   _appliedLeft;    // velocidade real no hardware (após rampa)
+    int   _appliedRight;
 
-    float         _prevError;    // erro do ciclo anterior — termo derivativo
-    float         _integral;     // acumulador de erro — termo integral
-    unsigned long _lastPDTime;   // timestamp da última execução do PID
+    float         _prevError;
+    float         _integral;
+    unsigned long _lastPDTime;
 
-    // Aplica MOTOR_TRIM_* e deadzone por motor
     int  applyTrimLeft(int speed)  const;
     int  applyTrimRight(int speed) const;
 
-    // Traduz velocidade com sinal para pinos L298N e PWM
-    void setPinDirection(int in1, int in2, int pwmPin, int speed);
+    // Aplica rampa de arranque ou inversão e envia ao hardware.
+    // @param pin1, pin2, pwmPin  pinos do canal L298N
+    // @param target              velocidade alvo com trim já aplicado
+    // @param applied             referência à velocidade atualmente no hardware
+    void _applyRamp(int pin1, int pin2, int pwmPin, int target, int& applied);
+
+    // Envia velocidade diretamente ao hardware (sem rampa)
+    void _writePins(int in1, int in2, int pwmPin, int speed);
 };
 
 #endif

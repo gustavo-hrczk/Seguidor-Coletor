@@ -5,6 +5,7 @@
 // ============================================================================
 MotorController::MotorController()
     : _currentLeft(0), _currentRight(0),
+      _appliedLeft(0),  _appliedRight(0),
       _prevError(0.0f), _integral(0.0f), _lastPDTime(0) {}
 
 // ============================================================================
@@ -22,16 +23,7 @@ void MotorController::initialize() {
 
 // ============================================================================
 // applyTrimLeft() / applyTrimRight()
-//
-// Aplica fator de trim individual antes de enviar ao hardware.
-// Perspectiva: robô visto de cima, frente para longe.
-//   Left  → motor ESQUERDO → MOTOR_TRIM_ESQ
-//   Right → motor DIREITO  → MOTOR_TRIM_DIR
-//
-// Fluxo:
-//   1. Multiplica pelo fator de trim
-//   2. Eleva ao PWM_MIN_DEADZONE se abaixo do limiar (preserva sinal)
-//   3. Limita ao máximo ±255
+// Aplica fator de trim e deadzone individual por motor.
 // ============================================================================
 int MotorController::applyTrimLeft(int speed) const {
     if (speed == 0) return 0;
@@ -52,23 +44,116 @@ int MotorController::applyTrimRight(int speed) const {
 }
 
 // ============================================================================
+// _writePins()
+// Envia velocidade diretamente ao hardware — sem rampa, sem trim.
+// Usado apenas internamente pela rampa em passos intermediários.
+// ============================================================================
+void MotorController::_writePins(int in1, int in2, int pwmPin, int speed) {
+    int pwm = constrain(abs(speed), 0, 255);
+    if (speed == 0) {
+        digitalWrite(in1, LOW);  digitalWrite(in2, LOW);  analogWrite(pwmPin, 0);
+    } else if (speed > 0) {
+        digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(pwmPin, pwm);
+    } else {
+        digitalWrite(in1, LOW);  digitalWrite(in2, HIGH); analogWrite(pwmPin, pwm);
+    }
+}
+
+// ============================================================================
+// _applyRamp()
+// Aplica rampa de aceleração ou inversão para um único motor.
+//
+// Cenário 1 — ARRANQUE (applied == 0, target != 0):
+//   Sobe de 0 até target em MOTOR_RAMP_STEPS degraus.
+//   Tempo total: MOTOR_RAMP_UP_MS ms.
+//
+// Cenário 2 — INVERSÃO (applied e target têm sinais opostos):
+//   Desce de applied até 0 em MOTOR_RAMP_STEPS degraus (MOTOR_RAMP_DOWN_MS ms),
+//   envia 0 por um ciclo de escrita, depois sobe para target normalmente.
+//   O motor nunca inverte polaridade sem passar por zero — elimina pico de stall.
+//
+// Cenário 3 — MESMA DIREÇÃO (ajuste de velocidade sem inversão):
+//   Envia target diretamente — sem rampa.
+//   O PID faz muitos desses ajustes a cada 10ms; rampar cada um
+//   introduziria latência que comprometeria o seguimento.
+//
+// Cenário 4 — PARADA (target == 0):
+//   Envia 0 diretamente — frenagem imediata é segura pois não inverte polaridade.
+// ============================================================================
+void MotorController::_applyRamp(int pin1, int pin2, int pwmPin,
+                                  int target, int& applied) {
+    // Cenário 4: parada — direto
+    if (target == 0) {
+        _writePins(pin1, pin2, pwmPin, 0);
+        applied = 0;
+        return;
+    }
+
+    bool arranque  = (applied == 0 && target != 0);
+    bool inversao  = (applied != 0) &&
+                     ((applied > 0 && target < 0) || (applied < 0 && target > 0));
+
+    // Cenário 2: inversão — desce até zero primeiro
+    if (inversao) {
+        int stepDelay = MOTOR_RAMP_DOWN_MS / MOTOR_RAMP_STEPS;
+        int stepSize  = applied / MOTOR_RAMP_STEPS;   // sempre mesmo sinal de applied
+
+        for (int i = MOTOR_RAMP_STEPS - 1; i >= 0; i--) {
+            int intermediate = stepSize * i;
+            // Mantém dentro da deadzone ou zero — nunca meia velocidade inútil
+            if (intermediate != 0 && abs(intermediate) < PWM_MIN_DEADZONE) {
+                intermediate = 0;
+            }
+            _writePins(pin1, pin2, pwmPin, intermediate);
+            delay(stepDelay);
+        }
+        // Garante zero por um ciclo antes de inverter
+        _writePins(pin1, pin2, pwmPin, 0);
+        applied = 0;
+        delay(2);
+    }
+
+    // Cenário 1: arranque — sobe progressivamente
+    if (arranque || inversao) {
+        int stepDelay = MOTOR_RAMP_UP_MS / MOTOR_RAMP_STEPS;
+        int stepSize  = target / MOTOR_RAMP_STEPS;
+
+        for (int i = 1; i <= MOTOR_RAMP_STEPS; i++) {
+            int intermediate = stepSize * i;
+            // Primeiro degrau já deve vencer a deadzone
+            if (abs(intermediate) < PWM_MIN_DEADZONE) {
+                intermediate = (target > 0) ? PWM_MIN_DEADZONE : -PWM_MIN_DEADZONE;
+            }
+            _writePins(pin1, pin2, pwmPin, intermediate);
+            delay(stepDelay);
+        }
+    }
+
+    // Cenário 3: mesma direção — ajuste direto (sem rampa — PID depende disso)
+    _writePins(pin1, pin2, pwmPin, target);
+    applied = target;
+}
+
+// ============================================================================
 // setMotorSpeed()
-// Ponto central — todos os métodos passam por aqui.
-// Armazena velocidades lógicas e aplica trim antes de enviar ao hardware.
+// Ponto central — todos os métodos de movimento passam por aqui.
+// 1. Armazena velocidades lógicas solicitadas
+// 2. Aplica trim individual
+// 3. Envia para _applyRamp() que protege o hardware
 // ============================================================================
 void MotorController::setMotorSpeed(int speedLeft, int speedRight) {
     _currentLeft  = speedLeft;
     _currentRight = speedRight;
-    setPinDirection(PIN_IN3, PIN_IN4, PIN_ENA, applyTrimLeft(speedLeft));
-    setPinDirection(PIN_IN1, PIN_IN2, PIN_ENB, applyTrimRight(speedRight));
+
+    int trimLeft  = applyTrimLeft(speedLeft);
+    int trimRight = applyTrimRight(speedRight);
+
+    _applyRamp(PIN_IN3, PIN_IN4, PIN_ENA, trimLeft,  _appliedLeft);
+    _applyRamp(PIN_IN1, PIN_IN2, PIN_ENB, trimRight, _appliedRight);
 }
 
 // ============================================================================
 // move()
-// TURN_*:  giro no eixo — dois motores em sentidos opostos, raio zero.
-//          Usado em manobras de coleta e recuperação de linha.
-// CURVE_*: arco com um motor parado — raio maior, menor consumo de corrente.
-//          Disponível para ajustes suaves ou uso futuro.
 // ============================================================================
 void MotorController::move(Direction direction, uint8_t speed) {
     speed = constrain(speed, 0, 255);
@@ -86,36 +171,23 @@ void MotorController::move(Direction direction, uint8_t speed) {
 // ============================================================================
 // stop()
 // ============================================================================
-void MotorController::stop() { setMotorSpeed(0, 0); }
+void MotorController::stop() {
+    // Parada direta — sem rampa, não inverte polaridade
+    _writePins(PIN_IN3, PIN_IN4, PIN_ENA, 0);
+    _writePins(PIN_IN1, PIN_IN2, PIN_ENB, 0);
+    _currentLeft = _currentRight = 0;
+    _appliedLeft = _appliedRight = 0;
+}
 
 // ============================================================================
-// followLine() — Controlador PID de seguimento
-//
-// Fórmula: correction = Kp*erro + Kd*derivativo + Ki*integral
-//
-// Motor externo à curva: baseSpeed constante — preserva velocidade de avanço.
-// Motor interno à curva: baseSpeed × (1 - |correction|), piso PD_MIN_INNER_SPEED.
-//
-// Termo integral — anti-deriva:
-//   Acumula error × dt a cada ciclo. Quando o robô fica consistentemente
-//   desviado, o acumulador cresce e a correção Ki×integral empurra
-//   progressivamente para o centro.
-//
-// Anti-windup:
-//   Zona morta (PID_INTEGRAL_DEADZONE): dentro de ±deadzone, zera o integral.
-//     Ruído em reta não gera acúmulo desnecessário.
-//   Clamp (PID_INTEGRAL_MAX): limita o valor absoluto do acumulador.
-//     Previne overshooting após curvas longas.
-//
-// Temporização com dt real:
-//   Ki independente da frequência do loop — usa segundos, não iterações.
+// followLine() — Controlador PID
 // ============================================================================
 void MotorController::followLine(float linePosition, uint8_t baseSpeed) {
     unsigned long now = millis();
     if (now - _lastPDTime < PD_SAMPLE_MS) return;
 
-    float dt     = (now - _lastPDTime) / 1000.0f;
-    _lastPDTime  = now;
+    float dt    = (now - _lastPDTime) / 1000.0f;
+    _lastPDTime = now;
 
     float error      = linePosition;
     float derivative = error - _prevError;
@@ -125,7 +197,7 @@ void MotorController::followLine(float linePosition, uint8_t baseSpeed) {
         _integral += error * dt;
         _integral  = constrain(_integral, -PID_INTEGRAL_MAX, PID_INTEGRAL_MAX);
     } else {
-        _integral = 0.0f;   // centrado — descarta acúmulo
+        _integral = 0.0f;
     }
 
     float correction = (PD_KP * error)
@@ -141,8 +213,6 @@ void MotorController::followLine(float linePosition, uint8_t baseSpeed) {
         (int)baseSpeed
     );
 
-    // correction > 0 → linha à direita → esquerdo é externo
-    // correction < 0 → linha à esquerda → direito é externo
     int leftSpeed, rightSpeed;
     if (correction >= 0.0f) {
         leftSpeed  = outerSpeed;
@@ -169,31 +239,10 @@ void MotorController::followLine(float linePosition, uint8_t baseSpeed) {
 
 // ============================================================================
 // resetPD()
-// Zera os três estados internos do controlador.
-// Sem este reset, o acúmulo da manobra anterior causa um spike de correção
-// imediatamente ao retomar o seguimento ("chicote" na retomada).
 // ============================================================================
 void MotorController::resetPD() {
-    _prevError  = 0.0f;
-    _integral   = 0.0f;
-    _lastPDTime = 0;
-}
-
-// ============================================================================
-// setPinDirection()
-// Traduz velocidade com sinal para L298N e PWM.
-// Recebe valor já com trim aplicado.
-//   speed > 0: IN_A=HIGH IN_B=LOW  → frente
-//   speed < 0: IN_A=LOW  IN_B=HIGH → ré
-//   speed = 0: IN_A=LOW  IN_B=LOW  → freio (curto-circuito no motor)
-// ============================================================================
-void MotorController::setPinDirection(int in1, int in2, int pwmPin, int speed) {
-    int pwm = constrain(abs(speed), 0, 255);
-    if (speed == 0) {
-        digitalWrite(in1, LOW);  digitalWrite(in2, LOW);  analogWrite(pwmPin, 0);
-    } else if (speed > 0) {
-        digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(pwmPin, pwm);
-    } else {
-        digitalWrite(in1, LOW);  digitalWrite(in2, HIGH); analogWrite(pwmPin, pwm);
-    }
+    _prevError   = 0.0f;
+    _integral    = 0.0f;
+    _lastPDTime  = 0;
+    _appliedLeft = _appliedRight = 0;   // força rampa de arranque na retomada
 }
